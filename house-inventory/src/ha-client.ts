@@ -36,6 +36,13 @@ export interface HaArea {
   icon: string | null;
 }
 
+export interface HaFloor {
+  floor_id: string;
+  name: string;
+  icon: string | null;
+  level: number | null;
+}
+
 export interface HaEntity {
   entity_id: string;
   device_id: string | null;
@@ -48,6 +55,7 @@ export interface HaEntity {
 export interface HaRegistrySnapshot {
   devices: HaDevice[];
   areas: HaArea[];
+  floors: HaFloor[];
   entities: HaEntity[];
   fetchedAt: Date;
 }
@@ -154,16 +162,33 @@ export class HaClient {
         }
         if (msg.type === "auth_ok") {
           try {
-            const [devicesRes, areasRes, entitiesRes] = await Promise.all([
-              send({ type: "config/device_registry/list" }),
-              send({ type: "config/area_registry/list" }),
-              send({ type: "config/entity_registry/list" }),
-            ]);
+            // Floors registry is newer — tolerate the command being
+            // unavailable on older HA versions by catching its promise.
+            const [devicesRes, areasRes, entitiesRes, floorsRes] =
+              await Promise.all([
+                send({ type: "config/device_registry/list" }),
+                send({ type: "config/area_registry/list" }),
+                send({ type: "config/entity_registry/list" }),
+                send({ type: "config/floor_registry/list" }).catch(
+                  () =>
+                    ({
+                      type: "result",
+                      result: [] as HaFloor[],
+                    }) as unknown as WsMessage,
+                ),
+              ]);
             const devices = (devicesRes as { result?: HaDevice[] }).result ?? [];
             const areas = (areasRes as { result?: HaArea[] }).result ?? [];
             const entities =
               (entitiesRes as { result?: HaEntity[] }).result ?? [];
-            resolve({ devices, areas, entities, fetchedAt: new Date() });
+            const floors = (floorsRes as { result?: HaFloor[] }).result ?? [];
+            resolve({
+              devices,
+              areas,
+              floors,
+              entities,
+              fetchedAt: new Date(),
+            });
           } catch (err) {
             reject(err);
           } finally {
