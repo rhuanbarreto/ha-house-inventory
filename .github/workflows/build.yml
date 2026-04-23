@@ -1,0 +1,74 @@
+name: Build add-on image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "house-inventory/**"
+      - ".github/workflows/build.yml"
+  pull_request:
+    paths:
+      - "house-inventory/**"
+      - ".github/workflows/build.yml"
+  workflow_dispatch:
+
+# We never push images in CI — this workflow exists to prove the add-on
+# Dockerfile still builds on every PR, before a user discovers it at
+# install time. Pushing to a registry is a separate "release" workflow.
+jobs:
+  build:
+    name: build ${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+            base: ghcr.io/home-assistant/amd64-base:3.19
+            bun_target: bun-linux-x64-musl
+          - arch: aarch64
+            platform: linux/arm64
+            base: ghcr.io/home-assistant/aarch64-base:3.19
+            bun_target: bun-linux-arm64-musl
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up QEMU (needed for aarch64 cross-build)
+        if: matrix.arch != 'amd64'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./house-inventory
+          file: ./house-inventory/Dockerfile
+          platforms: ${{ matrix.platform }}
+          build-args: |
+            BUILD_FROM=${{ matrix.base }}
+            BUN_TARGET=${{ matrix.bun_target }}
+          push: false
+          load: false
+          tags: house-inventory:${{ matrix.arch }}-ci
+          cache-from: type=gha,scope=${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
+
+  typecheck:
+    name: typecheck
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: house-inventory
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile || bun install
+      - run: bun run typecheck

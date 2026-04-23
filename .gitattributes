@@ -1,0 +1,24 @@
+# Force LF line endings for anything shell-executed inside the Linux
+# container (s6-overlay run scripts, Dockerfile, etc.). Without this,
+# checking out on Windows would store CRLF in files copied into the
+# image, and the `#!/usr/bin/with-contenv bashio` shebang breaks.
+*.sh              text eol=lf
+run               text eol=lf
+Dockerfile        text eol=lf
+Dockerfile.*      text eol=lf
+*.dockerfile      text eol=lf
+build.yaml        text eol=lf
+config.yaml       text eol=lf
+
+# Plain text — repo is authored on mixed platforms; normalize to LF.
+*.ts              text eol=lf
+*.js              text eol=lf
+*.json            text eol=lf
+*.md              text eol=lf
+*.yml             text eol=lf
+*.yaml            text eol=lf
+
+# Binary (never touch).
+*.png             binary
+*.jpg             binary
+*.pdf             binary
