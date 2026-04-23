@@ -13,6 +13,7 @@ import { HaClient } from "./ha-client.ts";
 import { openDatabase } from "./db.ts";
 import { syncFromHomeAssistant } from "./sync.ts";
 import { clearSetting, getSetting, setSetting } from "./settings.ts";
+import { enrichAsset } from "./enrich.ts";
 
 const SYNC_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
 
@@ -298,6 +299,39 @@ app.post("/llm/create", async (c) => {
     entity_id: null,
     note: "Subentry created but new entity didn't surface in time — re-discover via /llm.",
   });
+});
+
+// ---- enrichment ------------------------------------------------------------
+
+app.post("/enrich/:assetId", async (c) => {
+  const assetId = c.req.param("assetId");
+  try {
+    const result = await enrichAsset(db, ha, config.dataDir, assetId);
+    return c.json(result);
+  } catch (err) {
+    return c.json({ error: (err as Error).message }, 500);
+  }
+});
+
+app.get("/assets/:assetId", (c) => {
+  const assetId = c.req.param("assetId");
+  const asset = db
+    .query(
+      "SELECT * FROM assets WHERE id = ?",
+    )
+    .get(assetId);
+  if (!asset) return c.json({ error: "not found" }, 404);
+  const links = db
+    .query(
+      "SELECT kind, url, title, fetched_at FROM asset_links WHERE asset_id = ? ORDER BY kind",
+    )
+    .all(assetId);
+  const files = db
+    .query(
+      "SELECT kind, local_path, sha256, bytes, downloaded_at FROM asset_files WHERE asset_id = ?",
+    )
+    .all(assetId);
+  return c.json({ asset, links, files });
 });
 
 // ---- background sync -------------------------------------------------------
