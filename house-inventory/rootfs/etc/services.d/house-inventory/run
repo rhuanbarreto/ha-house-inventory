@@ -1,0 +1,21 @@
+#!/usr/bin/with-contenv bashio
+# ==============================================================================
+# Starts the House Inventory application.
+# ==============================================================================
+set -e
+
+bashio::log.info "Starting House Inventory..."
+
+# Expose relevant add-on options as env vars.
+export LOG_LEVEL="$(bashio::config 'log_level')"
+export WEB_SEARCH_PROVIDER="$(bashio::config 'web_search_provider')"
+export BRAVE_SEARCH_API_KEY="$(bashio::config 'brave_search_api_key')"
+
+# SUPERVISOR_TOKEN is injected by HA automatically when hassio_api: true.
+# HA Core API is reachable at http://supervisor/core/api from inside add-ons.
+export HA_BASE_URL="http://supervisor/core"
+export HA_TOKEN="${SUPERVISOR_TOKEN}"
+export HA_MODE="addon"
+
+# The binary ships with the Bun runtime baked in by `bun build --compile`.
+exec /usr/local/bin/house-inventory
