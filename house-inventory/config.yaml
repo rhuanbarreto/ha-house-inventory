@@ -25,12 +25,13 @@ panel_title: House Inventory
 
 options:
   log_level: info
-  ai_task_entity_id: ""
   web_search_provider: duckduckgo
   brave_search_api_key: ""
 
 schema:
   log_level: list(trace|debug|info|notice|info|warning|error|fatal)
-  ai_task_entity_id: str?
   web_search_provider: list(duckduckgo|brave)
   brave_search_api_key: password?
+
+# The AI Task used for enrichment is discovered at runtime and chosen in the
+# add-on UI — entity IDs are user-renameable in HA, so we never hardcode one.

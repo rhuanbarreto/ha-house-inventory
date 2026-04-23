@@ -8,7 +8,6 @@ bashio::log.info "Starting House Inventory..."
 
 # Expose relevant add-on options as env vars.
 export LOG_LEVEL="$(bashio::config 'log_level')"
-export AI_TASK_ENTITY_ID="$(bashio::config 'ai_task_entity_id')"
 export WEB_SEARCH_PROVIDER="$(bashio::config 'web_search_provider')"
 export BRAVE_SEARCH_API_KEY="$(bashio::config 'brave_search_api_key')"
 
