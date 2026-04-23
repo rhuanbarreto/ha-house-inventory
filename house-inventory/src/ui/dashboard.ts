@@ -6,6 +6,7 @@
 import type { Database } from "bun:sqlite";
 import type { Config } from "../config.ts";
 import { getSetting } from "../settings.ts";
+import { queueStatus } from "../enrich-batch.ts";
 import { escapeHtml, rel, renderFlash, renderPage } from "./layout.ts";
 
 export function renderDashboard(
@@ -127,7 +128,63 @@ export function renderDashboard(
           : `<p style="margin:0">No LLM configured yet. <a href="./llm">Pick or create one</a> to enable enrichment.</p>`
       }
     </div>
+
+    ${renderEnrichmentCard(db, llm !== null)}
   `;
 
   return renderPage({ title: "Dashboard", active: "home", body, baseHref });
+}
+
+/**
+ * Enrichment progress card: visual bar of how many assets still need
+ * enrichment, plus buttons to run a small/large batch now. Scheduler runs
+ * in the background too — this UI is for impatient users.
+ */
+function renderEnrichmentCard(db: Database, hasLlm: boolean): string {
+  const status = queueStatus(db);
+  const enriched = db
+    .query<{ c: number }, []>(
+      `SELECT COUNT(DISTINCT asset_id) AS c FROM asset_links`,
+    )
+    .get()?.c ?? 0;
+  const pending = status.total_eligible;
+  const total = pending + enriched;
+  const pct = total === 0 ? 0 : Math.round((enriched / total) * 100);
+
+  return /* html */ `
+    <h2>Enrichment progress</h2>
+    <div class="card">
+      <div style="display:flex;align-items:center;gap:12px;justify-content:space-between;flex-wrap:wrap">
+        <div>
+          <div style="font-size:22px;font-weight:600;letter-spacing:-0.02em">
+            ${enriched} / ${total} <span style="color:var(--text-faint);font-weight:400;font-size:14px">enriched</span>
+          </div>
+          <div class="muted" style="color:var(--text-dim);font-size:12.5px;margin-top:4px">
+            ${status.never_attempted} never attempted ·
+            ${status.stale} stale (>30d) ·
+            ${status.failed_in_backoff} failed (in backoff)
+          </div>
+          ${
+            status.last_success_at
+              ? `<div class="muted" style="color:var(--text-faint);font-size:12.5px;margin-top:4px">Last success: ${escapeHtml(rel(status.last_success_at))}</div>`
+              : ""
+          }
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <form method="post" action="./api/enrich/batch?n=3" style="margin:0">
+            <button class="btn" type="submit" ${!hasLlm || pending === 0 ? "disabled" : ""}>Enrich 3</button>
+          </form>
+          <form method="post" action="./api/enrich/batch?n=10" style="margin:0">
+            <button class="btn primary" type="submit" ${!hasLlm || pending === 0 ? "disabled" : ""}>Enrich 10</button>
+          </form>
+        </div>
+      </div>
+      <div style="margin-top:12px;height:6px;border-radius:999px;background:var(--surface-alt);overflow:hidden">
+        <div style="height:100%;width:${pct}%;background:var(--accent);transition:width .3s"></div>
+      </div>
+      <div class="muted" style="color:var(--text-faint);font-size:12px;margin-top:8px">
+        Background tick runs every 10 min · 3 assets at a time · DDG + AI Task throttled.
+      </div>
+    </div>
+  `;
 }

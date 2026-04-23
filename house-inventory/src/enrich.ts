@@ -100,6 +100,20 @@ export async function enrichAsset(
     }
   }
 
+  // Mark the asset as successfully enriched so the batch queue skips it.
+  // A missing manual PDF is NOT a failure — link set was still produced.
+  const now = new Date().toISOString();
+  db.run(
+    `UPDATE assets SET
+       last_enrichment_attempt_at = ?,
+       last_enrichment_success_at = ?,
+       last_enrichment_error = NULL,
+       enrichment_attempts = enrichment_attempts + 1,
+       updated_at = ?
+     WHERE id = ?`,
+    [now, now, now, assetId],
+  );
+
   return {
     asset_id: assetId,
     cache,

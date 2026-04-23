@@ -18,6 +18,7 @@ import { openDatabase } from "./db.ts";
 import { syncFromHomeAssistant } from "./sync.ts";
 import { clearSetting, getSetting, setSetting } from "./settings.ts";
 import { enrichAsset } from "./enrich.ts";
+import { queueStatus, runBatch } from "./enrich-batch.ts";
 import { renderDashboard } from "./ui/dashboard.ts";
 import {
   renderAssetDetail,
@@ -30,6 +31,10 @@ import { randomUUID } from "node:crypto";
 import { existsSync, statSync } from "node:fs";
 
 const SYNC_INTERVAL_MS = 15 * 60 * 1000;
+/** How often the background enrichment tick fires. */
+const ENRICH_INTERVAL_MS = 10 * 60 * 1000; // 10 min
+/** Assets processed per scheduled tick. Kept small to avoid bursting the LLM. */
+const ENRICH_BATCH_PER_TICK = 3;
 
 const config = loadConfig();
 const ha = new HaClient(config);
@@ -472,7 +477,46 @@ api.get("/llm/create/schema", async (c) => {
 });
 
 // ---- Enrich ---------------------------------------------------------------
+//
+// Route order matters: the specific paths (/enrich/status, /enrich/batch)
+// MUST come before /enrich/:assetId, otherwise Hono matches the wildcard
+// first and treats "batch" / "status" as asset ids.
 
+api.get("/enrich/status", (c) => {
+  return c.json(queueStatus(db));
+});
+
+api.post("/enrich/batch", async (c) => {
+  const accept = c.req.header("accept") ?? "";
+
+  // Accept `n` from query (GET-ish POST) or form body.
+  let max = Number(c.req.query("n") ?? "0");
+  if (!Number.isFinite(max) || max <= 0) {
+    const ct = c.req.header("content-type") ?? "";
+    if (ct.startsWith("application/x-www-form-urlencoded") || ct.startsWith("multipart/form-data")) {
+      const form = await c.req.formData().catch(() => null);
+      const fromForm = Number(form?.get("n") ?? "0");
+      if (Number.isFinite(fromForm) && fromForm > 0) max = fromForm;
+    }
+  }
+  if (!Number.isFinite(max) || max <= 0) max = 5;
+  max = Math.min(max, 50);
+
+  const result = await runBatch(db, ha, config.dataDir, { max });
+  if (accept.includes("application/json")) return c.json(result);
+
+  if (result.skippedNoLlm) {
+    return redirectWithFlash(c, "/", "err:No LLM selected — pick one on the LLM page first");
+  }
+  return redirectWithFlash(
+    c,
+    "/",
+    `ok:Batch — ${result.succeeded} ok, ${result.failed} failed, ${result.cacheHits} cache hit${result.cacheHits === 1 ? "" : "s"}`,
+  );
+});
+
+// Single-asset enrich — defined AFTER the specific /enrich/status and
+// /enrich/batch routes so the wildcard doesn't eat them.
 api.post("/enrich/:assetId", async (c) => {
   const assetId = c.req.param("assetId");
   const accept = c.req.header("accept") ?? "";
@@ -575,6 +619,32 @@ async function runSync(reason: string): Promise<void> {
 }
 queueMicrotask(() => void runSync("startup"));
 setInterval(() => void runSync("interval"), SYNC_INTERVAL_MS);
+
+async function runEnrichmentTick(): Promise<void> {
+  const status = queueStatus(db);
+  if (status.total_eligible === 0) return;
+  try {
+    const r = await runBatch(db, ha, config.dataDir, {
+      max: ENRICH_BATCH_PER_TICK,
+    });
+    if (r.skippedNoLlm) {
+      // eslint-disable-next-line no-console
+      console.log("[enrich] skipped tick — no LLM configured");
+      return;
+    }
+    if (r.processed === 0) return;
+    // eslint-disable-next-line no-console
+    console.log(
+      `[enrich] tick — ${r.succeeded}/${r.processed} ok, ${r.failed} failed, ${r.cacheHits} cache hit`,
+    );
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error(`[enrich] tick error: ${(err as Error).message}`);
+  }
+}
+// Give startup sync a head start, then start enriching.
+setTimeout(() => void runEnrichmentTick(), 10_000);
+setInterval(() => void runEnrichmentTick(), ENRICH_INTERVAL_MS);
 
 // eslint-disable-next-line no-console
 console.log(

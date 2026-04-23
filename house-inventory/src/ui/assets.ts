@@ -171,6 +171,10 @@ interface AssetRow {
   created_at: string;
   updated_at: string;
   last_seen_at: string | null;
+  last_enrichment_attempt_at: string | null;
+  last_enrichment_success_at: string | null;
+  last_enrichment_error: string | null;
+  enrichment_attempts: number;
 }
 
 interface LinkRow {
@@ -280,6 +284,13 @@ export function renderAssetDetail(
             <dt>HW</dt><dd>${escapeHtml(asset.hw_version ?? "—")}</dd>
             <dt>Serial</dt><dd>${escapeHtml(asset.serial_number ?? "—")}</dd>
             <dt>Last seen</dt><dd>${escapeHtml(rel(asset.last_seen_at))}</dd>
+            <dt>Enriched</dt><dd>${
+              asset.last_enrichment_success_at
+                ? `<span class="tag good">ok</span> ${escapeHtml(rel(asset.last_enrichment_success_at))}`
+                : asset.last_enrichment_error
+                  ? `<span class="tag danger">error</span> ${escapeHtml(asset.last_enrichment_error)}`
+                  : `<span class="muted" style="color:var(--text-faint)">never</span>`
+            }</dd>
           </dl>
         </div>
 
