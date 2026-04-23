@@ -147,6 +147,23 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE ha_sync_log ADD COLUMN devices_restored INTEGER NOT NULL DEFAULT 0;
     `,
   },
+  {
+    version: 5,
+    name: "floors",
+    sql: `
+      -- HA's floor registry: a floor groups a set of areas (e.g.
+      -- 'apartment' floor with 'kitchen', 'bedroom', etc.). We already
+      -- store floor_id on areas; this table gives us a name + icon +
+      -- level ordering to render a grouped "Areas" page.
+      CREATE TABLE floors (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        icon TEXT,
+        level INTEGER,
+        updated_at TEXT NOT NULL
+      );
+    `,
+  },
 ];
 
 export function openDatabase(dataDir: string): Database {

@@ -20,7 +20,7 @@
  */
 
 import type { Database } from "bun:sqlite";
-import type { HaClient, HaArea, HaDevice } from "./ha-client.ts";
+import type { HaClient, HaArea, HaDevice, HaFloor } from "./ha-client.ts";
 import { classifyDevice } from "./filters.ts";
 
 export interface SyncResult {
@@ -54,7 +54,7 @@ export async function syncFromHomeAssistant(
 
   try {
     const snap = await ha.fetchRegistry();
-    const counts = upsertRegistry(db, snap.devices, snap.areas);
+    const counts = upsertRegistry(db, snap.devices, snap.areas, snap.floors);
     const finishedAt = new Date().toISOString();
 
     db.run(
@@ -109,6 +109,7 @@ function upsertRegistry(
   db: Database,
   devices: HaDevice[],
   areas: HaArea[],
+  floors: HaFloor[],
 ): UpsertCounts {
   const now = new Date().toISOString();
   const counts: UpsertCounts = {
@@ -127,6 +128,16 @@ function upsertRegistry(
        name=excluded.name,
        floor_id=excluded.floor_id,
        icon=excluded.icon,
+       updated_at=excluded.updated_at`,
+  );
+
+  const upsertFloor = db.prepare(
+    `INSERT INTO floors (id, name, icon, level, updated_at)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET
+       name=excluded.name,
+       icon=excluded.icon,
+       level=excluded.level,
        updated_at=excluded.updated_at`,
   );
 
@@ -152,6 +163,9 @@ function upsertRegistry(
   );
 
   const tx = db.transaction(() => {
+    for (const f of floors) {
+      upsertFloor.run(f.floor_id, f.name, f.icon, f.level, now);
+    }
     for (const a of areas) {
       upsertArea.run(a.area_id, a.name, a.floor_id, a.icon, now);
       counts.areasUpserted++;

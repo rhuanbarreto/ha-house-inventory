@@ -13,7 +13,7 @@
 
 export interface PageProps {
   title: string;
-  active?: "home" | "assets" | "llm" | "sync";
+  active?: "home" | "assets" | "areas" | "llm" | "sync";
   body: string;
   /** Optional status bar message (shown top-right in the header). */
   status?: string;
@@ -272,6 +272,7 @@ export function renderPage(props: PageProps): string {
         <nav>
           ${navItem("./", "Dashboard", "home")}
           ${navItem("./assets", "Assets", "assets")}
+          ${navItem("./areas", "Areas", "areas")}
           ${navItem("./llm", "LLM", "llm")}
         </nav>
         <div class="status">${props.status ?? ""}</div>

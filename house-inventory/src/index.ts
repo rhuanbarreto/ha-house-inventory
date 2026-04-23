@@ -26,6 +26,7 @@ import {
   renderNewAssetForm,
 } from "./ui/assets.ts";
 import { renderLlmPage } from "./ui/llm.ts";
+import { renderAreasPage } from "./ui/areas.ts";
 import { escapeHtml } from "./ui/layout.ts";
 import { randomUUID } from "node:crypto";
 import { existsSync, statSync } from "node:fs";
@@ -93,6 +94,10 @@ app.get("/assets/:id", (c) => {
   if (!html) return c.notFound();
   return c.html(html);
 });
+
+app.get("/areas", (c) =>
+  c.html(renderAreasPage(db, c.req.query("flash"), baseHrefFor(c))),
+);
 
 app.get("/llm", async (c) => {
   const html = await renderLlmPage(db, ha, c.req.query("flash"), baseHrefFor(c));
