@@ -12,6 +12,7 @@ import { loadConfig } from "./config.ts";
 import { HaClient } from "./ha-client.ts";
 import { openDatabase } from "./db.ts";
 import { syncFromHomeAssistant } from "./sync.ts";
+import { clearSetting, getSetting, setSetting } from "./settings.ts";
 
 const SYNC_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
 
@@ -44,6 +45,7 @@ app.get("/", (c) => {
       "SELECT started_at, finished_at, error FROM ha_sync_log ORDER BY id DESC LIMIT 1",
     )
     .get();
+  const llm = getSetting(db, "llm_entity_id");
   return c.html(
     `<!doctype html>
 <html>
@@ -58,7 +60,9 @@ app.get("/", (c) => {
     </ul>
     <h2>Last sync</h2>
     <p>${lastSync ? `${lastSync.started_at} → ${lastSync.finished_at ?? "in progress"} ${lastSync.error ? `(error: ${lastSync.error})` : "(ok)"}` : "never"}</p>
-    <p><a href="./assets">Browse assets (JSON)</a> · <a href="./assets?hidden=1">Hidden assets</a> · <a href="./sync" data-method="post">POST /sync</a></p>
+    <h2>LLM for enrichment</h2>
+    <p>${llm ? `Selected: <code>${llm}</code>` : `Not configured — <a href="./llm">pick one</a>`}</p>
+    <p><a href="./assets">Browse assets (JSON)</a> · <a href="./assets?hidden=1">Hidden assets</a> · <a href="./llm">Discover LLM entities</a> · <a href="./sync" data-method="post">POST /sync</a></p>
   </body>
 </html>`,
   );
@@ -109,6 +113,191 @@ app.get("/sync/history", (c) => {
     )
     .all();
   return c.json(rows);
+});
+
+// ---- LLM discovery + selection ---------------------------------------------
+
+app.get("/llm", async (c) => {
+  try {
+    const discovered = await ha.discoverLlmEntities();
+    const current = getSetting(db, "llm_entity_id");
+    const aiTasks = discovered.filter((e) => e.kind === "ai_task");
+    const conversationAgents = discovered.filter(
+      (e) => e.kind === "conversation",
+    );
+    return c.json({
+      current,
+      discovered,
+      counts: {
+        ai_tasks: aiTasks.length,
+        conversation_agents: conversationAgents.length,
+      },
+      // Prefer an AI Task if exactly one exists and nothing is selected yet.
+      autoSelectable:
+        current === null && aiTasks.length === 1
+          ? (aiTasks[0]?.entity_id ?? null)
+          : null,
+    });
+  } catch (err) {
+    return c.json({ error: (err as Error).message }, 500);
+  }
+});
+
+app.put("/settings/llm", async (c) => {
+  const body = (await c.req.json().catch(() => null)) as {
+    entity_id?: string;
+  } | null;
+  const id = body?.entity_id;
+  if (!id) {
+    return c.json({ error: "entity_id is required" }, 400);
+  }
+
+  // Validate against what HA currently reports — stops stale/typo-ed IDs.
+  const discovered = await ha.discoverLlmEntities();
+  const match = discovered.find((e) => e.entity_id === id);
+  if (!match) {
+    return c.json(
+      {
+        error: `entity_id not found in HA: ${id}`,
+        available: discovered.map((e) => e.entity_id),
+      },
+      404,
+    );
+  }
+  setSetting(db, "llm_entity_id", id);
+  return c.json({ ok: true, entity_id: id, kind: match.kind });
+});
+
+app.delete("/settings/llm", (c) => {
+  clearSetting(db, "llm_entity_id");
+  return c.json({ ok: true });
+});
+
+// ---- AI Task creation ------------------------------------------------------
+
+/**
+ * List HA integrations that can have an AI Task created on them.
+ * A GET form so the UI can populate a dropdown before POSTing /llm/create.
+ */
+app.get("/llm/creatable", async (c) => {
+  try {
+    const entries = await ha.listAiTaskCreatableEntries();
+    return c.json({
+      count: entries.length,
+      entries: entries.map((e) => ({
+        entry_id: e.entry_id,
+        domain: e.domain,
+        title: e.title,
+        existing_subentries: e.num_subentries,
+      })),
+    });
+  } catch (err) {
+    return c.json({ error: (err as Error).message }, 500);
+  }
+});
+
+/**
+ * Inspect the first step of the create flow for a given integration.
+ * Returns the form schema so the UI knows which options to collect.
+ */
+app.get("/llm/create/schema", async (c) => {
+  const entryId = c.req.query("entry_id");
+  if (!entryId) return c.json({ error: "entry_id is required" }, 400);
+  try {
+    const step = await ha.startSubentryFlow(entryId, "ai_task_data");
+    if (step.type !== "form") {
+      // Non-form response on step 1 is unusual — surface as-is so callers
+      // can decide. Flow is left dangling; HA will time it out.
+      return c.json(step);
+    }
+    return c.json({
+      flow_id: step.flow_id,
+      step_id: step.step_id,
+      data_schema: step.data_schema,
+    });
+  } catch (err) {
+    return c.json({ error: (err as Error).message }, 500);
+  }
+});
+
+/**
+ * Create an AI Task subentry on the given integration.
+ *
+ * Body: { entry_id: string, options: Record<string, unknown> }
+ *
+ * We drive the subentry flow forward step-by-step, feeding the same `options`
+ * object to every form step. Each integration's AI Task flow is typically
+ * one form, but we loop to be safe.
+ */
+app.post("/llm/create", async (c) => {
+  const body = (await c.req.json().catch(() => null)) as {
+    entry_id?: string;
+    options?: Record<string, unknown>;
+  } | null;
+  if (!body?.entry_id) {
+    return c.json({ error: "entry_id is required" }, 400);
+  }
+  const options = body.options ?? {};
+
+  const entitiesBefore = new Set(
+    (await ha.discoverLlmEntities())
+      .filter((e) => e.kind === "ai_task")
+      .map((e) => e.entity_id),
+  );
+
+  let step = await ha.startSubentryFlow(body.entry_id, "ai_task_data");
+  const maxSteps = 5;
+  let count = 0;
+
+  while (step.type === "form" && count < maxSteps) {
+    count++;
+    step = await ha.submitSubentryFlow(step.flow_id, options);
+  }
+
+  if (step.type === "form") {
+    await ha.cancelSubentryFlow(step.flow_id);
+    return c.json(
+      { error: "AI Task creation needed too many steps — aborted" },
+      500,
+    );
+  }
+
+  if (step.type === "abort") {
+    return c.json(
+      { error: `AI Task creation aborted: ${step.reason}` },
+      400,
+    );
+  }
+
+  // Entities are registered asynchronously after the subentry is created —
+  // poll briefly for the new ai_task.* entity to appear.
+  let newEntityId: string | null = null;
+  for (let i = 0; i < 10; i++) {
+    const after = await ha.discoverLlmEntities();
+    const newAiTask = after.find(
+      (e) => e.kind === "ai_task" && !entitiesBefore.has(e.entity_id),
+    );
+    if (newAiTask) {
+      newEntityId = newAiTask.entity_id;
+      break;
+    }
+    await new Promise((r) => setTimeout(r, 500));
+  }
+
+  if (newEntityId) {
+    setSetting(db, "llm_entity_id", newEntityId);
+    return c.json({
+      ok: true,
+      entity_id: newEntityId,
+      auto_selected: true,
+    });
+  }
+
+  return c.json({
+    ok: true,
+    entity_id: null,
+    note: "Subentry created but new entity didn't surface in time — re-discover via /llm.",
+  });
 });
 
 // ---- background sync -------------------------------------------------------

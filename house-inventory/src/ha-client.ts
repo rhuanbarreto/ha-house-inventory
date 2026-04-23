@@ -52,6 +52,57 @@ export interface HaRegistrySnapshot {
   fetchedAt: Date;
 }
 
+/**
+ * An HA entity we can ask to generate text/data for enrichment.
+ * `kind` determines which service we call: `ai_task.generate_data` for
+ * AI Tasks (structured), `conversation.process` for conversation agents.
+ * We filter out HA's built-in `conversation.home_assistant` default agent
+ * because it cannot reach the internet or answer open-ended questions.
+ */
+export type LlmKind = "ai_task" | "conversation";
+
+export interface LlmEntity {
+  entity_id: string;
+  kind: LlmKind;
+  friendly_name: string | null;
+  state: string;
+}
+
+interface HaStateRow {
+  entity_id: string;
+  state: string;
+  attributes: Record<string, unknown>;
+}
+
+export interface HaConfigEntry {
+  entry_id: string;
+  domain: string;
+  title: string;
+  state: string;
+  supported_subentry_types: Record<
+    string,
+    { supports_reconfigure?: boolean } | undefined
+  >;
+  num_subentries: number;
+}
+
+/** Shape of the sub-union we care about from HA's config-flow responses. */
+export type HaFlowStep =
+  | {
+      type: "form";
+      flow_id: string;
+      step_id: string;
+      data_schema: Array<{ name: string; required?: boolean }>;
+      errors: Record<string, string> | null;
+    }
+  | {
+      type: "create_entry";
+      flow_id: string;
+      title: string;
+      result?: { subentry_id?: string };
+    }
+  | { type: "abort"; flow_id: string; reason: string };
+
 type WsMessage = Record<string, unknown> & { id?: number; type: string };
 
 export class HaClient {
@@ -130,6 +181,144 @@ export class HaClient {
         }
       };
     });
+  }
+
+  /**
+   * Discover entities we can use for LLM-backed enrichment.
+   *
+   * Two categories, both via the `/api/states` REST endpoint because entity
+   * IDs in HA are user-renameable:
+   *   - `ai_task.*`     — structured-output tasks (preferred when available)
+   *   - `conversation.*` — free-text agents (fallback). We exclude HA's
+   *                        built-in `conversation.home_assistant` default
+   *                        agent, which can't reach the internet or answer
+   *                        open-ended product questions.
+   */
+  async discoverLlmEntities(): Promise<LlmEntity[]> {
+    const res = await fetch(`${this.config.haBaseUrl}/api/states`, {
+      headers: { Authorization: `Bearer ${this.config.haToken}` },
+    });
+    if (!res.ok) {
+      throw new Error(
+        `HA /api/states failed: ${res.status} ${res.statusText}`,
+      );
+    }
+    const states = (await res.json()) as HaStateRow[];
+    const result: LlmEntity[] = [];
+    for (const s of states) {
+      const friendly =
+        (s.attributes?.["friendly_name"] as string | undefined) ?? null;
+      if (s.entity_id.startsWith("ai_task.")) {
+        result.push({
+          entity_id: s.entity_id,
+          kind: "ai_task",
+          friendly_name: friendly,
+          state: s.state,
+        });
+      } else if (
+        s.entity_id.startsWith("conversation.") &&
+        s.entity_id !== "conversation.home_assistant"
+      ) {
+        result.push({
+          entity_id: s.entity_id,
+          kind: "conversation",
+          friendly_name: friendly,
+          state: s.state,
+        });
+      }
+    }
+    return result;
+  }
+
+  /** List all config entries — used to find LLM integrations we can extend. */
+  async listConfigEntries(): Promise<HaConfigEntry[]> {
+    const res = await fetch(
+      `${this.config.haBaseUrl}/api/config/config_entries/entry`,
+      { headers: { Authorization: `Bearer ${this.config.haToken}` } },
+    );
+    if (!res.ok) {
+      throw new Error(
+        `HA /api/config/config_entries/entry failed: ${res.status}`,
+      );
+    }
+    return (await res.json()) as HaConfigEntry[];
+  }
+
+  /**
+   * List LLM integrations that support creating an AI Task as a subentry.
+   *
+   * In HA 2025.7+, LLM integrations (open_router, openai_conversation, etc.)
+   * declare `ai_task_data` in their `supported_subentry_types`. Our plugin
+   * can kick off a config-flow on them to create a new AI Task entity
+   * without the user leaving the add-on UI.
+   */
+  async listAiTaskCreatableEntries(): Promise<HaConfigEntry[]> {
+    const entries = await this.listConfigEntries();
+    return entries.filter(
+      (e) =>
+        e.state === "loaded" &&
+        e.supported_subentry_types &&
+        "ai_task_data" in e.supported_subentry_types,
+    );
+  }
+
+  /** Start a subentry config-flow. Returns the first step (usually a form). */
+  async startSubentryFlow(
+    entryId: string,
+    subentryType: string,
+  ): Promise<HaFlowStep> {
+    const res = await fetch(
+      `${this.config.haBaseUrl}/api/config/config_entries/subentries/flow`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${this.config.haToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ handler: [entryId, subentryType] }),
+      },
+    );
+    if (!res.ok) {
+      throw new Error(
+        `Start subentry flow failed: ${res.status} ${await res.text()}`,
+      );
+    }
+    return (await res.json()) as HaFlowStep;
+  }
+
+  /** Submit form data to an in-flight subentry config-flow step. */
+  async submitSubentryFlow(
+    flowId: string,
+    data: Record<string, unknown>,
+  ): Promise<HaFlowStep> {
+    const res = await fetch(
+      `${this.config.haBaseUrl}/api/config/config_entries/subentries/flow/${flowId}`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${this.config.haToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(data),
+      },
+    );
+    if (!res.ok) {
+      throw new Error(
+        `Submit subentry flow failed: ${res.status} ${await res.text()}`,
+      );
+    }
+    return (await res.json()) as HaFlowStep;
+  }
+
+  /** Cancel an in-flight subentry flow (best-effort cleanup on error paths). */
+  async cancelSubentryFlow(flowId: string): Promise<void> {
+    await fetch(
+      `${this.config.haBaseUrl}/api/config/config_entries/subentries/flow/${flowId}`,
+      {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${this.config.haToken}` },
+      },
+    ).catch(() => undefined);
   }
 
   /**

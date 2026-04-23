@@ -20,8 +20,6 @@ export interface Config {
   port: number;
   /** Where SQLite DB + downloaded manuals live. Mapped to HA's /data in prod. */
   dataDir: string;
-  /** Entity id of the configured AI Task (e.g. "ai_task.openrouter"). */
-  aiTaskEntityId: string | null;
   /** Web search provider for enrichment. */
   webSearchProvider: "duckduckgo" | "brave";
   /** Optional Brave Search API key. */
@@ -61,7 +59,6 @@ export function loadConfig(): Config {
     haToken,
     port: Number(process.env.PORT ?? "8099"),
     dataDir: process.env.DATA_DIR ?? "./data",
-    aiTaskEntityId: process.env.AI_TASK_ENTITY_ID || null,
     webSearchProvider: provider,
     braveApiKey: process.env.BRAVE_SEARCH_API_KEY || null,
     logLevel: (process.env.LOG_LEVEL as Config["logLevel"]) ?? "info",
