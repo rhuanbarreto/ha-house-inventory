@@ -121,6 +121,24 @@ const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  {
+    version: 3,
+    name: "asset_enrichment_state",
+    sql: `
+      ALTER TABLE assets ADD COLUMN last_enrichment_attempt_at TEXT;
+      ALTER TABLE assets ADD COLUMN last_enrichment_success_at TEXT;
+      ALTER TABLE assets ADD COLUMN last_enrichment_error TEXT;
+      ALTER TABLE assets ADD COLUMN enrichment_attempts INTEGER NOT NULL DEFAULT 0;
+
+      -- Index the filter the queue uses heavily: physical assets that still
+      -- need enrichment, oldest-attempted first.
+      CREATE INDEX idx_assets_enrichment_queue
+        ON assets(hidden, last_enrichment_attempt_at)
+        WHERE hidden = 0
+          AND manufacturer IS NOT NULL
+          AND model IS NOT NULL;
+    `,
+  },
 ];
 
 export function openDatabase(dataDir: string): Database {
