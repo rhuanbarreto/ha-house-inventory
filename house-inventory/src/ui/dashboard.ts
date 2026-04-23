@@ -171,10 +171,12 @@ function renderEnrichmentCard(db: Database, hasLlm: boolean): string {
           }
         </div>
         <div style="display:flex;gap:8px;align-items:center">
-          <form method="post" action="./api/enrich/batch?n=3" style="margin:0">
+          <form method="post" action="./api/enrich/batch?n=3" style="margin:0"
+                onsubmit="const b=this.querySelector('button');b.disabled=true;b.textContent='Enriching 3…';">
             <button class="btn" type="submit" ${!hasLlm || pending === 0 ? "disabled" : ""}>Enrich 3</button>
           </form>
-          <form method="post" action="./api/enrich/batch?n=10" style="margin:0">
+          <form method="post" action="./api/enrich/batch?n=10" style="margin:0"
+                onsubmit="const b=this.querySelector('button');b.disabled=true;b.textContent='Enriching 10…';">
             <button class="btn primary" type="submit" ${!hasLlm || pending === 0 ? "disabled" : ""}>Enrich 10</button>
           </form>
         </div>
