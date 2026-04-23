@@ -1,21 +1,35 @@
 /**
  * House Inventory — entrypoint.
  *
- * Responsibilities:
- *   - Open the SQLite DB (and run migrations) at DATA_DIR/inventory.db
- *   - Expose an HTTP API for the UI / HA Ingress
- *   - Run an initial HA sync on boot, then every SYNC_INTERVAL_MS
+ * Two surfaces on one Hono app:
+ *   - `/api/*`  JSON endpoints (scripting / HA automations / internal UI)
+ *   - top-level HTML pages for humans (dashboard, assets, LLM picker).
+ *
+ * All mutating actions go through `/api/*` and either respond with JSON
+ * (Accept: application/json) or redirect back to an HTML page with a
+ * `?flash=<kind>:<text>` query param so the user sees the result.
  */
 
 import { Hono } from "hono";
+import type { Context } from "hono";
 import { loadConfig } from "./config.ts";
 import { HaClient } from "./ha-client.ts";
 import { openDatabase } from "./db.ts";
 import { syncFromHomeAssistant } from "./sync.ts";
 import { clearSetting, getSetting, setSetting } from "./settings.ts";
 import { enrichAsset } from "./enrich.ts";
+import { renderDashboard } from "./ui/dashboard.ts";
+import {
+  renderAssetDetail,
+  renderAssetList,
+  renderNewAssetForm,
+} from "./ui/assets.ts";
+import { renderLlmPage } from "./ui/llm.ts";
+import { escapeHtml } from "./ui/layout.ts";
+import { randomUUID } from "node:crypto";
+import { existsSync, statSync } from "node:fs";
 
-const SYNC_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
+const SYNC_INTERVAL_MS = 15 * 60 * 1000;
 
 const config = loadConfig();
 const ha = new HaClient(config);
@@ -23,117 +37,276 @@ const db = openDatabase(config.dataDir);
 
 const app = new Hono();
 
-app.get("/healthz", (c) => c.text("ok"));
+// ===========================================================================
+//   HTML pages
+// ===========================================================================
 
-app.get("/", (c) => {
-  const totals = db
-    .query<
-      { total: number; visible: number; hidden: number; areas: number },
-      []
-    >(
-      `SELECT
-         (SELECT COUNT(*) FROM assets)             AS total,
-         (SELECT COUNT(*) FROM assets WHERE hidden=0) AS visible,
-         (SELECT COUNT(*) FROM assets WHERE hidden=1) AS hidden,
-         (SELECT COUNT(*) FROM areas)              AS areas`,
-    )
-    .get();
-  const lastSync = db
-    .query<
-      { started_at: string; finished_at: string | null; error: string | null },
-      []
-    >(
-      "SELECT started_at, finished_at, error FROM ha_sync_log ORDER BY id DESC LIMIT 1",
-    )
-    .get();
-  const llm = getSetting(db, "llm_entity_id");
-  return c.html(
-    `<!doctype html>
-<html>
-  <head><title>House Inventory</title></head>
-  <body>
-    <h1>House Inventory</h1>
-    <p>Mode: <strong>${config.mode}</strong></p>
-    <h2>Totals</h2>
-    <ul>
-      <li>Assets: ${totals?.total ?? 0} (visible: ${totals?.visible ?? 0}, hidden: ${totals?.hidden ?? 0})</li>
-      <li>Areas: ${totals?.areas ?? 0}</li>
-    </ul>
-    <h2>Last sync</h2>
-    <p>${lastSync ? `${lastSync.started_at} → ${lastSync.finished_at ?? "in progress"} ${lastSync.error ? `(error: ${lastSync.error})` : "(ok)"}` : "never"}</p>
-    <h2>LLM for enrichment</h2>
-    <p>${llm ? `Selected: <code>${llm}</code>` : `Not configured — <a href="./llm">pick one</a>`}</p>
-    <p><a href="./assets">Browse assets (JSON)</a> · <a href="./assets?hidden=1">Hidden assets</a> · <a href="./llm">Discover LLM entities</a> · <a href="./sync" data-method="post">POST /sync</a></p>
-  </body>
-</html>`,
+/**
+ * Compute the base URL for relative links on a page.
+ * Dev: "/". Behind HA Ingress: `${X-Ingress-Path}/` so the browser resolves
+ * relative URLs to the ingress-prefixed path (ingress strips the prefix
+ * again on the way in, so our routes stay at /, /assets, /api/*, etc.).
+ */
+function baseHrefFor(c: Context): string {
+  const ingress = c.req.header("x-ingress-path");
+  if (ingress && ingress.length > 0) {
+    return ingress.endsWith("/") ? ingress : `${ingress}/`;
+  }
+  return "/";
+}
+
+app.get("/", (c) =>
+  c.html(renderDashboard(db, config, c.req.query("flash"), baseHrefFor(c))),
+);
+
+app.get("/assets", (c) =>
+  c.html(
+    renderAssetList(
+      db,
+      {
+        q: c.req.query("q"),
+        area: c.req.query("area"),
+        hidden: c.req.query("hidden") as "0" | "1" | undefined,
+      },
+      c.req.query("flash"),
+      baseHrefFor(c),
+    ),
+  ),
+);
+
+app.get("/assets/new", (c) =>
+  c.html(renderNewAssetForm(db, c.req.query("flash"), baseHrefFor(c))),
+);
+
+app.get("/assets/:id", (c) => {
+  const html = renderAssetDetail(
+    db,
+    c.req.param("id"),
+    c.req.query("flash"),
+    baseHrefFor(c),
   );
+  if (!html) return c.notFound();
+  return c.html(html);
 });
 
-app.get("/assets", (c) => {
+app.get("/llm", async (c) => {
+  const html = await renderLlmPage(db, ha, c.req.query("flash"), baseHrefFor(c));
+  return c.html(html);
+});
+
+// ---- Health (kept at root for container health checks) --------------------
+app.get("/healthz", (c) => c.text("ok"));
+
+// ===========================================================================
+//   /api — JSON + form handlers
+// ===========================================================================
+
+const api = new Hono();
+
+// ---- Assets list + detail (JSON) ------------------------------------------
+
+api.get("/assets", (c) => {
   const showHidden = c.req.query("hidden") === "1";
-  const areaFilter = c.req.query("area");
-  const whereParts: string[] = [];
+  const where: string[] = [`hidden = ${showHidden ? 1 : 0}`];
   const params: (string | number)[] = [];
-  whereParts.push(`hidden = ${showHidden ? 1 : 0}`);
-  if (areaFilter) {
-    whereParts.push("area_id = ?");
-    params.push(areaFilter);
+  const area = c.req.query("area");
+  if (area) {
+    where.push("area_id = ?");
+    params.push(area);
   }
   const rows = db
-    .query<
-      {
-        id: string;
-        name: string;
-        manufacturer: string | null;
-        model: string | null;
-        area_id: string | null;
-        source: string;
-        hidden: number;
-        hidden_reason: string | null;
-      },
-      (string | number)[]
-    >(
+    .query(
       `SELECT id, name, manufacturer, model, area_id, source, hidden, hidden_reason
        FROM assets
-       WHERE ${whereParts.join(" AND ")}
-       ORDER BY COALESCE(manufacturer, ''), COALESCE(model, ''), name`,
+       WHERE ${where.join(" AND ")}
+       ORDER BY COALESCE(manufacturer,''), COALESCE(model,''), name`,
     )
     .all(...params);
   return c.json({ count: rows.length, assets: rows });
 });
 
-app.post("/sync", async (c) => {
-  const result = await syncFromHomeAssistant(db, ha);
-  return c.json(result, result.error ? 500 : 200);
+api.get("/assets/:id", (c) => {
+  const assetId = c.req.param("id");
+  const asset = db
+    .query("SELECT * FROM assets WHERE id = ?")
+    .get(assetId);
+  if (!asset) return c.json({ error: "not found" }, 404);
+  const links = db
+    .query(
+      "SELECT id, kind, url, title, fetched_at FROM asset_links WHERE asset_id = ? ORDER BY kind",
+    )
+    .all(assetId);
+  const files = db
+    .query(
+      "SELECT id, kind, local_path, sha256, bytes, downloaded_at FROM asset_files WHERE asset_id = ?",
+    )
+    .all(assetId);
+  return c.json({ asset, links, files });
 });
 
-app.get("/sync/history", (c) => {
-  const rows = db
-    .query(
-      "SELECT * FROM ha_sync_log ORDER BY id DESC LIMIT 20",
+// ---- Create manual asset --------------------------------------------------
+
+api.post("/assets", async (c) => {
+  const form = await c.req.formData();
+  const name = String(form.get("name") ?? "").trim();
+  if (name.length === 0) {
+    return redirectWithFlash(c, "/assets/new", "err:Name is required");
+  }
+
+  const manufacturer = strOrNull(form.get("manufacturer"));
+  const model = strOrNull(form.get("model"));
+  const category = strOrNull(form.get("category"));
+  const areaId = strOrNull(form.get("area_id"));
+  const purchaseDate = strOrNull(form.get("purchase_date"));
+  const warrantyUntil = strOrNull(form.get("warranty_until"));
+  const notes = strOrNull(form.get("notes"));
+  const priceCents = parsePriceCents(form.get("purchase_price"));
+
+  const id = `manual_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
+  const now = new Date().toISOString();
+
+  db.run(
+    `INSERT INTO assets (
+       id, source, ha_device_id, name, manufacturer, model, area_id,
+       category, purchase_date, purchase_price_cents, warranty_until, notes,
+       hidden, hidden_reason, created_at, updated_at, last_seen_at
+     ) VALUES (?, 'manual', NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, ?)`,
+    [
+      id,
+      name,
+      manufacturer,
+      model,
+      areaId,
+      category,
+      purchaseDate,
+      priceCents,
+      warrantyUntil,
+      notes,
+      now,
+      now,
+      now,
+    ],
+  );
+
+  return redirectWithFlash(c, `/assets/${id}`, `ok:Created ${name}`);
+});
+
+api.post("/assets/:id/edit", async (c) => {
+  const assetId = c.req.param("id");
+  const form = await c.req.formData();
+  const exists = db
+    .query<{ id: string }, [string]>("SELECT id FROM assets WHERE id = ?")
+    .get(assetId);
+  if (!exists) return c.json({ error: "not found" }, 404);
+
+  const category = strOrNull(form.get("category"));
+  const areaId = strOrNull(form.get("area_id"));
+  const purchaseDate = strOrNull(form.get("purchase_date"));
+  const warrantyUntil = strOrNull(form.get("warranty_until"));
+  const notes = strOrNull(form.get("notes"));
+  const priceCents = parsePriceCents(form.get("purchase_price"));
+
+  db.run(
+    `UPDATE assets SET
+       category=?, area_id=?, purchase_date=?, purchase_price_cents=?,
+       warranty_until=?, notes=?, updated_at=?
+     WHERE id=?`,
+    [
+      category,
+      areaId,
+      purchaseDate,
+      priceCents,
+      warrantyUntil,
+      notes,
+      new Date().toISOString(),
+      assetId,
+    ],
+  );
+  return redirectWithFlash(c, `/assets/${assetId}`, "ok:Saved");
+});
+
+api.post("/assets/:id/toggle-hidden", (c) => {
+  const assetId = c.req.param("id");
+  const row = db
+    .query<{ hidden: number }, [string]>(
+      "SELECT hidden FROM assets WHERE id = ?",
     )
+    .get(assetId);
+  if (!row) return c.json({ error: "not found" }, 404);
+  const next = row.hidden ? 0 : 1;
+  db.run(
+    `UPDATE assets SET hidden=?, hidden_reason=?, updated_at=? WHERE id=?`,
+    [
+      next,
+      next === 1 ? "manual_hide" : null,
+      new Date().toISOString(),
+      assetId,
+    ],
+  );
+  return redirectWithFlash(
+    c,
+    `/assets/${assetId}`,
+    next === 1 ? "ok:Hidden" : "ok:Unhidden",
+  );
+});
+
+api.post("/assets/:id/delete", (c) => {
+  const assetId = c.req.param("id");
+  const row = db
+    .query<{ source: string; name: string }, [string]>(
+      "SELECT source, name FROM assets WHERE id = ?",
+    )
+    .get(assetId);
+  if (!row) return c.json({ error: "not found" }, 404);
+  if (row.source !== "manual") {
+    return redirectWithFlash(
+      c,
+      `/assets/${assetId}`,
+      "err:Only manual assets can be deleted",
+    );
+  }
+  db.run("DELETE FROM assets WHERE id = ?", [assetId]);
+  return redirectWithFlash(c, "/assets", `ok:Deleted ${row.name}`);
+});
+
+// ---- Sync ------------------------------------------------------------------
+
+api.post("/sync", async (c) => {
+  const result = await syncFromHomeAssistant(db, ha);
+  const accept = c.req.header("accept") ?? "";
+  if (accept.includes("application/json")) {
+    return c.json(result, result.error ? 500 : 200);
+  }
+  return redirectWithFlash(
+    c,
+    "/",
+    result.error
+      ? `err:Sync failed — ${result.error}`
+      : `ok:Synced — +${result.devicesAdded} added, ${result.devicesUpdated} updated`,
+  );
+});
+
+api.get("/sync/history", (c) => {
+  const rows = db
+    .query("SELECT * FROM ha_sync_log ORDER BY id DESC LIMIT 20")
     .all();
   return c.json(rows);
 });
 
-// ---- LLM discovery + selection ---------------------------------------------
+// ---- LLM -------------------------------------------------------------------
 
-app.get("/llm", async (c) => {
+api.get("/llm", async (c) => {
   try {
     const discovered = await ha.discoverLlmEntities();
     const current = getSetting(db, "llm_entity_id");
     const aiTasks = discovered.filter((e) => e.kind === "ai_task");
-    const conversationAgents = discovered.filter(
-      (e) => e.kind === "conversation",
-    );
     return c.json({
       current,
       discovered,
       counts: {
         ai_tasks: aiTasks.length,
-        conversation_agents: conversationAgents.length,
+        conversation_agents: discovered.length - aiTasks.length,
       },
-      // Prefer an AI Task if exactly one exists and nothing is selected yet.
       autoSelectable:
         current === null && aiTasks.length === 1
           ? (aiTasks[0]?.entity_id ?? null)
@@ -144,24 +317,38 @@ app.get("/llm", async (c) => {
   }
 });
 
-app.put("/settings/llm", async (c) => {
+api.post("/settings/llm", async (c) => {
+  const form = await c.req.formData();
+  const id = String(form.get("entity_id") ?? "").trim();
+  if (!id) {
+    return redirectWithFlash(c, "/llm", "err:entity_id is required");
+  }
+  const discovered = await ha.discoverLlmEntities();
+  const match = discovered.find((e) => e.entity_id === id);
+  if (!match) {
+    return redirectWithFlash(c, "/llm", `err:Not found in HA: ${id}`);
+  }
+  setSetting(db, "llm_entity_id", id);
+  return redirectWithFlash(c, "/llm", `ok:Selected ${id}`);
+});
+
+api.post("/settings/llm/clear", (c) => {
+  clearSetting(db, "llm_entity_id");
+  return redirectWithFlash(c, "/llm", "ok:Cleared");
+});
+
+// Legacy JSON handlers kept for scripting.
+api.put("/settings/llm", async (c) => {
   const body = (await c.req.json().catch(() => null)) as {
     entity_id?: string;
   } | null;
   const id = body?.entity_id;
-  if (!id) {
-    return c.json({ error: "entity_id is required" }, 400);
-  }
-
-  // Validate against what HA currently reports — stops stale/typo-ed IDs.
+  if (!id) return c.json({ error: "entity_id is required" }, 400);
   const discovered = await ha.discoverLlmEntities();
   const match = discovered.find((e) => e.entity_id === id);
   if (!match) {
     return c.json(
-      {
-        error: `entity_id not found in HA: ${id}`,
-        available: discovered.map((e) => e.entity_id),
-      },
+      { error: `entity_id not found: ${id}`, available: discovered.map((e) => e.entity_id) },
       404,
     );
   }
@@ -169,18 +356,12 @@ app.put("/settings/llm", async (c) => {
   return c.json({ ok: true, entity_id: id, kind: match.kind });
 });
 
-app.delete("/settings/llm", (c) => {
+api.delete("/settings/llm", (c) => {
   clearSetting(db, "llm_entity_id");
   return c.json({ ok: true });
 });
 
-// ---- AI Task creation ------------------------------------------------------
-
-/**
- * List HA integrations that can have an AI Task created on them.
- * A GET form so the UI can populate a dropdown before POSTing /llm/create.
- */
-app.get("/llm/creatable", async (c) => {
+api.get("/llm/creatable", async (c) => {
   try {
     const entries = await ha.listAiTaskCreatableEntries();
     return c.json({
@@ -197,20 +378,89 @@ app.get("/llm/creatable", async (c) => {
   }
 });
 
-/**
- * Inspect the first step of the create flow for a given integration.
- * Returns the form schema so the UI knows which options to collect.
- */
-app.get("/llm/create/schema", async (c) => {
+api.post("/llm/create", async (c) => {
+  const isForm =
+    (c.req.header("content-type") ?? "").startsWith(
+      "application/x-www-form-urlencoded",
+    ) ||
+    (c.req.header("content-type") ?? "").startsWith("multipart/form-data");
+
+  let entryId: string | undefined;
+  let options: Record<string, unknown> = {};
+  if (isForm) {
+    const form = await c.req.formData();
+    entryId = String(form.get("entry_id") ?? "").trim();
+    const model = String(form.get("model") ?? "").trim();
+    if (model) options["model"] = model;
+  } else {
+    const body = (await c.req.json().catch(() => null)) as {
+      entry_id?: string;
+      options?: Record<string, unknown>;
+    } | null;
+    entryId = body?.entry_id;
+    options = body?.options ?? {};
+  }
+
+  if (!entryId) {
+    if (isForm) return redirectWithFlash(c, "/llm", "err:entry_id required");
+    return c.json({ error: "entry_id is required" }, 400);
+  }
+
+  const entitiesBefore = new Set(
+    (await ha.discoverLlmEntities())
+      .filter((e) => e.kind === "ai_task")
+      .map((e) => e.entity_id),
+  );
+
+  let step = await ha.startSubentryFlow(entryId, "ai_task_data");
+  for (let i = 0; step.type === "form" && i < 5; i++) {
+    step = await ha.submitSubentryFlow(step.flow_id, options);
+  }
+  if (step.type === "form") {
+    await ha.cancelSubentryFlow(step.flow_id);
+    const msg = "Creation needed too many steps — aborted";
+    if (isForm) return redirectWithFlash(c, "/llm", `err:${msg}`);
+    return c.json({ error: msg }, 500);
+  }
+  if (step.type === "abort") {
+    const msg = `Aborted: ${step.reason}`;
+    if (isForm) return redirectWithFlash(c, "/llm", `err:${msg}`);
+    return c.json({ error: msg }, 400);
+  }
+
+  let newEntityId: string | null = null;
+  for (let i = 0; i < 10; i++) {
+    const after = await ha.discoverLlmEntities();
+    const nw = after.find(
+      (e) => e.kind === "ai_task" && !entitiesBefore.has(e.entity_id),
+    );
+    if (nw) {
+      newEntityId = nw.entity_id;
+      break;
+    }
+    await new Promise((r) => setTimeout(r, 500));
+  }
+
+  if (newEntityId) {
+    setSetting(db, "llm_entity_id", newEntityId);
+    if (isForm) {
+      return redirectWithFlash(c, "/llm", `ok:Created ${newEntityId}`);
+    }
+    return c.json({ ok: true, entity_id: newEntityId, auto_selected: true });
+  }
+
+  const msg =
+    "Subentry created but entity didn't surface — refresh /llm in a moment.";
+  if (isForm) return redirectWithFlash(c, "/llm", `info:${msg}`);
+  return c.json({ ok: true, entity_id: null, note: msg });
+});
+
+api.get("/llm/create/schema", async (c) => {
   const entryId = c.req.query("entry_id");
   if (!entryId) return c.json({ error: "entry_id is required" }, 400);
   try {
     const step = await ha.startSubentryFlow(entryId, "ai_task_data");
-    if (step.type !== "form") {
-      // Non-form response on step 1 is unusual — surface as-is so callers
-      // can decide. Flow is left dangling; HA will time it out.
-      return c.json(step);
-    }
+    if (step.type !== "form") return c.json(step);
     return c.json({
       flow_id: step.flow_id,
       step_id: step.step_id,
@@ -221,120 +471,94 @@ app.get("/llm/create/schema", async (c) => {
   }
 });
 
-/**
- * Create an AI Task subentry on the given integration.
- *
- * Body: { entry_id: string, options: Record<string, unknown> }
- *
- * We drive the subentry flow forward step-by-step, feeding the same `options`
- * object to every form step. Each integration's AI Task flow is typically
- * one form, but we loop to be safe.
- */
-app.post("/llm/create", async (c) => {
-  const body = (await c.req.json().catch(() => null)) as {
-    entry_id?: string;
-    options?: Record<string, unknown>;
-  } | null;
-  if (!body?.entry_id) {
-    return c.json({ error: "entry_id is required" }, 400);
-  }
-  const options = body.options ?? {};
+// ---- Enrich ---------------------------------------------------------------
 
-  const entitiesBefore = new Set(
-    (await ha.discoverLlmEntities())
-      .filter((e) => e.kind === "ai_task")
-      .map((e) => e.entity_id),
-  );
-
-  let step = await ha.startSubentryFlow(body.entry_id, "ai_task_data");
-  const maxSteps = 5;
-  let count = 0;
-
-  while (step.type === "form" && count < maxSteps) {
-    count++;
-    step = await ha.submitSubentryFlow(step.flow_id, options);
-  }
-
-  if (step.type === "form") {
-    await ha.cancelSubentryFlow(step.flow_id);
-    return c.json(
-      { error: "AI Task creation needed too many steps — aborted" },
-      500,
+api.post("/enrich/:assetId", async (c) => {
+  const assetId = c.req.param("assetId");
+  const accept = c.req.header("accept") ?? "";
+  try {
+    const result = await enrichAsset(db, ha, config.dataDir, assetId);
+    if (accept.includes("application/json")) return c.json(result);
+    const linkCount = Object.values(result.links).filter(
+      (v) => typeof v === "string",
+    ).length;
+    return redirectWithFlash(
+      c,
+      `/assets/${assetId}`,
+      `ok:Enriched (${result.cache}) — ${linkCount} links${result.manual_downloaded ? ", manual PDF saved" : ""}`,
     );
+  } catch (err) {
+    const msg = (err as Error).message;
+    if (accept.includes("application/json"))
+      return c.json({ error: msg }, 500);
+    return redirectWithFlash(c, `/assets/${assetId}`, `err:${msg}`);
   }
+});
 
-  if (step.type === "abort") {
-    return c.json(
-      { error: `AI Task creation aborted: ${step.reason}` },
-      400,
-    );
+// ---- Files (serve downloaded PDFs) -----------------------------------------
+
+api.get("/files/:fileId", (c) => {
+  const fileId = Number(c.req.param("fileId"));
+  if (!Number.isFinite(fileId)) return c.notFound();
+  const row = db
+    .query<{ local_path: string; kind: string }, [number]>(
+      "SELECT local_path, kind FROM asset_files WHERE id = ?",
+    )
+    .get(fileId);
+  if (!row) return c.notFound();
+  if (!existsSync(row.local_path)) {
+    return c.text(`File missing on disk: ${row.local_path}`, 410);
   }
-
-  // Entities are registered asynchronously after the subentry is created —
-  // poll briefly for the new ai_task.* entity to appear.
-  let newEntityId: string | null = null;
-  for (let i = 0; i < 10; i++) {
-    const after = await ha.discoverLlmEntities();
-    const newAiTask = after.find(
-      (e) => e.kind === "ai_task" && !entitiesBefore.has(e.entity_id),
-    );
-    if (newAiTask) {
-      newEntityId = newAiTask.entity_id;
-      break;
-    }
-    await new Promise((r) => setTimeout(r, 500));
-  }
-
-  if (newEntityId) {
-    setSetting(db, "llm_entity_id", newEntityId);
-    return c.json({
-      ok: true,
-      entity_id: newEntityId,
-      auto_selected: true,
-    });
-  }
-
-  return c.json({
-    ok: true,
-    entity_id: null,
-    note: "Subentry created but new entity didn't surface in time — re-discover via /llm.",
+  const file = Bun.file(row.local_path);
+  const bytes = statSync(row.local_path).size;
+  return new Response(file, {
+    headers: {
+      "Content-Type": "application/pdf",
+      "Content-Length": String(bytes),
+      "Content-Disposition": `inline; filename="${row.kind}.pdf"`,
+      "Cache-Control": "private, max-age=31536000, immutable",
+    },
   });
 });
 
-// ---- enrichment ------------------------------------------------------------
+app.route("/api", api);
 
-app.post("/enrich/:assetId", async (c) => {
-  const assetId = c.req.param("assetId");
-  try {
-    const result = await enrichAsset(db, ha, config.dataDir, assetId);
-    return c.json(result);
-  } catch (err) {
-    return c.json({ error: (err as Error).message }, 500);
-  }
-});
+// ===========================================================================
+//   Helpers
+// ===========================================================================
 
-app.get("/assets/:assetId", (c) => {
-  const assetId = c.req.param("assetId");
-  const asset = db
-    .query(
-      "SELECT * FROM assets WHERE id = ?",
-    )
-    .get(assetId);
-  if (!asset) return c.json({ error: "not found" }, 404);
-  const links = db
-    .query(
-      "SELECT kind, url, title, fetched_at FROM asset_links WHERE asset_id = ? ORDER BY kind",
-    )
-    .all(assetId);
-  const files = db
-    .query(
-      "SELECT kind, local_path, sha256, bytes, downloaded_at FROM asset_files WHERE asset_id = ?",
-    )
-    .all(assetId);
-  return c.json({ asset, links, files });
-});
+// FormData values can be strings or File. For our inputs they're all strings,
+// but TypeScript wants us to narrow rather than assume.
+type FormValue = string | File | null;
 
-// ---- background sync -------------------------------------------------------
+function strOrNull(v: FormValue): string | null {
+  if (v === null) return null;
+  const s = String(v).trim();
+  return s.length === 0 ? null : s;
+}
+
+function parsePriceCents(v: FormValue): number | null {
+  if (v === null) return null;
+  const s = String(v).trim();
+  if (s.length === 0) return null;
+  const n = Number.parseFloat(s.replace(",", "."));
+  if (!Number.isFinite(n)) return null;
+  return Math.round(n * 100);
+}
+
+function redirectWithFlash(c: Context, path: string, flash: string): Response {
+  const url = `${path}?flash=${encodeURIComponent(flash)}`;
+  return c.redirect(url, 303);
+}
+
+// `escapeHtml` is imported only so tooling picks up the intent — UI modules
+// use it directly. Suppress "unused import" warnings.
+void escapeHtml;
+
+// ===========================================================================
+//   Background sync
+// ===========================================================================
+
 async function runSync(reason: string): Promise<void> {
   // eslint-disable-next-line no-console
   console.log(`[sync] triggered (${reason})`);
@@ -349,8 +573,6 @@ async function runSync(reason: string): Promise<void> {
     );
   }
 }
-
-// Run once on boot (don't block startup), then on an interval.
 queueMicrotask(() => void runSync("startup"));
 setInterval(() => void runSync("interval"), SYNC_INTERVAL_MS);
 
