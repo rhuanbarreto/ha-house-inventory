@@ -15,6 +15,7 @@
     "forceConsistentCasingInFileNames": true,
     "isolatedModules": true,
     "verbatimModuleSyntax": false,
+    "allowImportingTsExtensions": true,
     "noEmit": true,
     "jsx": "react-jsx"
   },
