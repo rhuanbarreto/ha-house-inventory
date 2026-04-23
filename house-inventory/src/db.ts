@@ -139,6 +139,14 @@ const MIGRATIONS: Migration[] = [
           AND model IS NOT NULL;
     `,
   },
+  {
+    version: 4,
+    name: "sync_removal_stats",
+    sql: `
+      ALTER TABLE ha_sync_log ADD COLUMN devices_removed INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE ha_sync_log ADD COLUMN devices_restored INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
 ];
 
 export function openDatabase(dataDir: string): Database {
