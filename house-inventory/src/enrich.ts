@@ -20,9 +20,10 @@
 import type { Database } from "bun:sqlite";
 import type { HaClient } from "./ha-client.ts";
 import { generateStructured } from "./ai-task.ts";
-import { searchDuckDuckGo } from "./search.ts";
+import { searchDuckDuckGo, type SearchResult } from "./search.ts";
 import { downloadPdf, NotAPdfError } from "./download.ts";
 import { getSetting } from "./settings.ts";
+import { getBrandSeed, isTrustedDomain } from "./brand-seeds.ts";
 
 export interface EnrichedLinks extends Record<string, unknown> {
   product_url: string | null;
@@ -135,28 +136,70 @@ async function researchAndAsk(
     `${manufacturer} ${model} manual support`,
     `${manufacturer} ${model} manual filetype:pdf`,
   ];
-  const results = await Promise.all(queries.map((q) => searchDuckDuckGo(q, 8)));
-  const merged = dedupeByUrl(results.flat()).slice(0, 16);
+  const ddgResults = await Promise.all(
+    queries.map((q) => searchDuckDuckGo(q, 8)),
+  );
+  const merged = dedupeByUrl(ddgResults.flat()).slice(0, 16);
 
-  const searchBlob = merged
+  // Prepend brand-portal URLs so the LLM can cite them even when DDG
+  // didn't surface the real support site at the top.
+  const seed = getBrandSeed(manufacturer);
+  const seedCandidates: SearchResult[] = [];
+  if (seed) {
+    if (seed.product_url) {
+      seedCandidates.push({
+        url: seed.product_url,
+        title: `${manufacturer} official product site`,
+        snippet: "Brand-portal seed (not from DDG).",
+      });
+    }
+    if (seed.support_url) {
+      seedCandidates.push({
+        url: seed.support_url,
+        title: `${manufacturer} official support portal`,
+        snippet: "Brand-portal seed (not from DDG).",
+      });
+    }
+    if (seed.parts_url) {
+      seedCandidates.push({
+        url: seed.parts_url,
+        title: `${manufacturer} parts & accessories`,
+        snippet: "Brand-portal seed (not from DDG).",
+      });
+    }
+    if (seed.firmware_url) {
+      seedCandidates.push({
+        url: seed.firmware_url,
+        title: `${manufacturer} firmware downloads`,
+        snippet: "Brand-portal seed (not from DDG).",
+      });
+    }
+  }
+  const allCandidates = dedupeByUrl([...seedCandidates, ...merged]);
+
+  const searchBlob = allCandidates
     .map(
       (r, i) => `[${i + 1}] ${r.title}\n    ${r.url}\n    ${r.snippet}`,
     )
     .join("\n\n");
 
   const instructions = `You are helping build a house asset inventory.
-Pick the best URLs for this product from the web search results below. Only
-return URLs that actually appear in the results — never invent one. If a
-field isn't clearly findable, return null.
+Pick the best URLs for this product from the candidates below. Candidates
+include web-search hits and (for some brands) official portal seeds.
+
+Rules:
+  - Only return URLs that appear verbatim in the candidate list — never invent one.
+  - Prefer official manufacturer sites over third-party listings (manualslib, amazon, etc.).
+  - If a field isn't clearly findable, return null.
 
 Product:
   Manufacturer: ${manufacturer}
   Model: ${model}
 
-Web search results:
+Candidates:
 ${searchBlob}`;
 
-  return await generateStructured<EnrichedLinks>(ha, {
+  const raw = await generateStructured<EnrichedLinks>(ha, {
     entityId,
     taskName: `enrich_${manufacturer}_${model}`.replace(/[^a-z0-9_]/gi, "_"),
     instructions,
@@ -186,6 +229,37 @@ ${searchBlob}`;
       },
     },
   });
+
+  // Anti-hallucination: nuke any URL that isn't in the candidate set AND
+  // isn't from a known-trusted domain for this brand.
+  return validateUrls(raw, allCandidates, manufacturer);
+}
+
+/**
+ * Null out fields whose URL wasn't in the candidate pool and isn't on a
+ * trusted domain for this brand. Preserves non-URL fields verbatim.
+ */
+function validateUrls(
+  links: EnrichedLinks,
+  candidates: SearchResult[],
+  manufacturer: string,
+): EnrichedLinks {
+  const allowed = new Set(candidates.map((c) => c.url));
+  const checkField = (value: string | null): string | null => {
+    if (!value) return null;
+    if (allowed.has(value)) return value;
+    if (isTrustedDomain(value, manufacturer)) return value;
+    return null;
+  };
+  return {
+    product_url: checkField(links.product_url),
+    support_url: checkField(links.support_url),
+    manual_url: checkField(links.manual_url),
+    firmware_url: checkField(links.firmware_url),
+    parts_url: checkField(links.parts_url),
+    model_marketing_name: links.model_marketing_name,
+    notes: links.notes,
+  };
 }
 
 function dedupeByUrl<T extends { url: string }>(items: T[]): T[] {
