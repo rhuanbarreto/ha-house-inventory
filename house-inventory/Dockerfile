@@ -2,7 +2,6 @@
 # BuildKit doesn't complain about "undeclared" ARGs in later FROM lines.
 # renovate: datasource=docker depName=oven/bun
 ARG BUN_VERSION=1.3-alpine
-ARG BUN_TARGET=bun-linux-x64-musl
 ARG BUILD_FROM=ghcr.io/home-assistant/amd64-base:3.19
 
 ############################################################################
@@ -12,11 +11,14 @@ ARG BUILD_FROM=ghcr.io/home-assistant/amd64-base:3.19
 # executable. Build from Bun's official image so we don't spend build time
 # installing Bun inside the HA base image. `--target=bun-linux-<arch>-musl`
 # tells Bun to produce a binary for Alpine (musl), matching the HA runtime.
+#
+# TARGETARCH is auto-set by BuildKit (and by HA's supervisor builder) to
+# "amd64" or "arm64". We translate it to Bun's target string so HA's own
+# build just works without requiring per-arch build args.
 ############################################################################
 FROM oven/bun:${BUN_VERSION} AS builder
 
-# ARG must be redeclared inside the stage to be usable in RUN commands.
-ARG BUN_TARGET
+ARG TARGETARCH
 
 WORKDIR /app
 COPY package.json bun.lock* ./
@@ -25,9 +27,16 @@ RUN bun install --production --frozen-lockfile || bun install --production
 COPY tsconfig.json ./
 COPY src ./src
 
-# Single-file executable. --minify trims bundle size; sourcemap is kept
-# outside the binary so error stacks are still useful in the container logs.
-RUN bun build ./src/index.ts \
+# Translate docker's TARGETARCH to Bun's --target argument, then compile.
+# --minify trims bundle size; sourcemap kept outside the binary so stack
+# traces in logs stay readable.
+RUN set -e; \
+    case "${TARGETARCH:-amd64}" in \
+      amd64) BUN_TARGET=bun-linux-x64-musl ;; \
+      arm64) BUN_TARGET=bun-linux-arm64-musl ;; \
+      *) echo "unsupported arch: ${TARGETARCH}" >&2 && exit 1 ;; \
+    esac; \
+    bun build ./src/index.ts \
       --compile \
       --minify \
       --target="${BUN_TARGET}" \
