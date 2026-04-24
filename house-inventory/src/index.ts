@@ -19,6 +19,7 @@ import { syncFromHomeAssistant } from "./sync.ts";
 import { clearSetting, getSetting, setSetting } from "./settings.ts";
 import { enrichAsset } from "./enrich.ts";
 import { queueStatus, runBatch } from "./enrich-batch.ts";
+import { getInFlightBatch, setInFlightBatch } from "./batch-state.ts";
 import { renderDashboard } from "./ui/dashboard.ts";
 import {
   renderAssetDetail,
@@ -491,6 +492,12 @@ api.get("/enrich/status", (c) => {
   return c.json(queueStatus(db));
 });
 
+// Batch enrichment is long-running (~30s per asset × N). Running it
+// synchronously inside the HTTP handler held the client connection open
+// for minutes, and HA Ingress's reverse proxy would time it out and flag
+// the add-on as "not ready". We now fire-and-forget: the POST returns
+// immediately, the batch runs in the background, and the dashboard shows
+// a "batch running" indicator until it finishes.
 api.post("/enrich/batch", async (c) => {
   const accept = c.req.header("accept") ?? "";
 
@@ -507,17 +514,55 @@ api.post("/enrich/batch", async (c) => {
   if (!Number.isFinite(max) || max <= 0) max = 5;
   max = Math.min(max, 50);
 
-  const result = await runBatch(db, ha, config.dataDir, { max });
-  if (accept.includes("application/json")) return c.json(result);
+  const existing = getInFlightBatch();
+  if (existing) {
+    const msg = `A batch of ${existing.max} is already running (started ${existing.startedAt}). Refresh to watch progress.`;
+    if (accept.includes("application/json")) {
+      return c.json({ error: msg, inFlight: existing }, 409);
+    }
+    return redirectWithFlash(c, "/", `info:${msg}`);
+  }
 
-  if (result.skippedNoLlm) {
-    return redirectWithFlash(c, "/", "err:No LLM selected — pick one on the LLM page first");
+  // Fail fast if no LLM — otherwise the user gets a useless redirect and
+  // the background task immediately no-ops.
+  if (!getSetting(db, "llm_entity_id")) {
+    const msg = "No LLM selected — pick one on the LLM page first";
+    if (accept.includes("application/json")) return c.json({ error: msg }, 400);
+    return redirectWithFlash(c, "/", `err:${msg}`);
+  }
+
+  setInFlightBatch({ startedAt: new Date().toISOString(), max });
+  // eslint-disable-next-line no-console
+  console.log(`[batch] kicked off n=${max}`);
+
+  // Intentionally not awaited — the HTTP handler returns immediately.
+  void runBatch(db, ha, config.dataDir, { max })
+    .then((r) => {
+      // eslint-disable-next-line no-console
+      console.log(
+        `[batch] done — ${r.succeeded}/${r.processed} ok, ${r.failed} failed, ${r.cacheHits} cache hit${r.cacheHits === 1 ? "" : "s"}`,
+      );
+    })
+    .catch((err) => {
+      // eslint-disable-next-line no-console
+      console.error(`[batch] error: ${(err as Error).message}`);
+    })
+    .finally(() => {
+      setInFlightBatch(null);
+    });
+
+  if (accept.includes("application/json")) {
+    return c.json({ ok: true, started: true, max });
   }
   return redirectWithFlash(
     c,
     "/",
-    `ok:Batch — ${result.succeeded} ok, ${result.failed} failed, ${result.cacheHits} cache hit${result.cacheHits === 1 ? "" : "s"}`,
+    `ok:Batch of ${max} started in the background — refresh to watch progress`,
   );
+});
+
+api.get("/enrich/inflight", (c) => {
+  return c.json({ inFlight: getInFlightBatch() });
 });
 
 // Single-asset enrich — defined AFTER the specific /enrich/status and
