@@ -641,11 +641,13 @@ function parsePriceCents(v: FormValue): number | null {
 }
 
 function redirectWithFlash(c: Context, path: string, flash: string): Response {
-  // Under HA Ingress, the browser's URL includes a prefix like
-  // /api/hassio_ingress/<token>/ that we need to preserve in the Location
-  // header — otherwise a Location of "/llm" escapes the ingress scope and
-  // 404s. X-Ingress-Path is the prefix HA injects; empty in dev.
-  const prefix = (c.req.header("x-ingress-path") ?? "").replace(/\/$/, "");
+  // Behind HA Ingress the addon is served at `${X-Ingress-Path}/…`. An
+  // absolute `Location: /foo` would escape the ingress prefix and send the
+  // browser to the HA origin root (the HA home page), so prepend the prefix
+  // when the header is present. In dev the header is absent and we emit a
+  // plain absolute path as before.
+  const ingress = c.req.header("x-ingress-path") ?? "";
+  const prefix = ingress.endsWith("/") ? ingress.slice(0, -1) : ingress;
   const url = `${prefix}${path}?flash=${encodeURIComponent(flash)}`;
   return c.redirect(url, 303);
 }
