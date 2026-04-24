@@ -4,6 +4,9 @@
  * Uses code-based route definitions (no file-based codegen needed for
  * 6 flat routes). Each route has a loader that pre-fetches data via
  * TanStack Query's `ensureQueryData`.
+ *
+ * Routes are eagerly imported — code-splitting 6 tiny pages adds
+ * complexity without meaningful benefit for a local-network add-on.
  */
 
 import {
@@ -13,37 +16,6 @@ import {
 } from "@tanstack/react-router";
 import { queryClient } from "./query.ts";
 import { getBaseUrl } from "./api.ts";
-
-// -- Lazy route imports (code-split each page) --------------------------------
-
-const lazyRootRoute = () => import("./routes/__root.tsx");
-const lazyIndex = () => import("./routes/index.tsx");
-const lazyAssetList = () => import("./routes/assets.index.tsx");
-const lazyAssetNew = () => import("./routes/assets.new.tsx");
-const lazyAssetDetail = () => import("./routes/assets.$id.tsx");
-const lazyAreas = () => import("./routes/areas.tsx");
-const lazyLlm = () => import("./routes/llm.tsx");
-
-// -- Route tree ---------------------------------------------------------------
-
-const rootRoute = createRootRoute({
-  component: () => {
-    // Resolved lazily — the actual component is set below after we import
-    throw new Error("Root component should be set via lazy loading");
-  },
-});
-
-// Override root component after lazy import
-rootRoute.update({
-  component: undefined, // will be set via the lazy import pattern below
-});
-
-// We'll use a simpler approach: define routes with inline lazy components
-// TanStack Router supports this via route.lazy()
-
-// Actually, for simplicity with 6 routes, let's just import them eagerly.
-// The total code is small and code-splitting 6 tiny pages adds complexity
-// without meaningful benefit for a local-network add-on.
 
 import { RootLayout } from "./routes/__root.tsx";
 import { DashboardPage } from "./routes/index.tsx";

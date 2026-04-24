@@ -22,7 +22,21 @@ import { getSetting } from "./settings.ts";
 import type { SearchConfig } from "./search.ts";
 
 const STALE_MS = 30 * 86_400_000; // 30 days
-const BACKOFF_MS = 6 * 3_600_000; // 6h after a failed attempt
+const BASE_BACKOFF_MS = 6 * 3_600_000; // 6h base after a failed attempt
+/** Max backoff: ~8 days (6h × 2^5). Prevents permanent exclusion. */
+const MAX_BACKOFF_MS = 8 * 86_400_000;
+
+/**
+ * Exponential backoff: 6h, 12h, 24h, 48h, 96h, 192h (capped at ~8d).
+ * Uses the asset's `enrichment_attempts` count so repeat failures
+ * get progressively longer delays instead of retrying every 6h forever.
+ */
+export function backoffMs(attempts: number): number {
+  if (attempts <= 1) return BASE_BACKOFF_MS;
+  // 2^(attempts-1) × base, capped at MAX_BACKOFF_MS
+  const multiplier = Math.pow(2, Math.min(attempts - 1, 10));
+  return Math.min(BASE_BACKOFF_MS * multiplier, MAX_BACKOFF_MS);
+}
 
 export interface BatchResult {
   processed: number;
@@ -51,33 +65,62 @@ export interface QueueStatus {
 
 export function queueStatus(db: Database): QueueStatus {
   const staleCutoff = new Date(Date.now() - STALE_MS).toISOString();
-  const backoffCutoff = new Date(Date.now() - BACKOFF_MS).toISOString();
+  const now = Date.now();
 
-  const row = db
+  // First pass: get all eligible assets with their attempt counts so we
+  // can compute per-asset exponential backoff on the application side.
+  const candidates = db
     .query<
       {
-        total_eligible: number;
-        never_attempted: number;
-        stale: number;
-        failed_in_backoff: number;
+        last_enrichment_attempt_at: string | null;
+        last_enrichment_success_at: string | null;
+        last_enrichment_error: string | null;
+        enrichment_attempts: number;
       },
-      [string, string]
+      [string]
     >(
       `SELECT
-         COUNT(*) AS total_eligible,
-         SUM(CASE WHEN a.last_enrichment_attempt_at IS NULL THEN 1 ELSE 0 END) AS never_attempted,
-         SUM(CASE WHEN a.last_enrichment_success_at IS NOT NULL AND a.last_enrichment_success_at < ? THEN 1 ELSE 0 END) AS stale,
-         SUM(CASE WHEN a.last_enrichment_error IS NOT NULL AND a.last_enrichment_attempt_at >= ? THEN 1 ELSE 0 END) AS failed_in_backoff
+         a.last_enrichment_attempt_at,
+         a.last_enrichment_success_at,
+         a.last_enrichment_error,
+         a.enrichment_attempts
        FROM assets a
        WHERE a.hidden = 0
          AND a.manufacturer IS NOT NULL AND a.manufacturer != ''
          AND a.model IS NOT NULL AND a.model != ''`,
     )
-    .get(staleCutoff, backoffCutoff) ?? {
-    total_eligible: 0,
-    never_attempted: 0,
-    stale: 0,
-    failed_in_backoff: 0,
+    .all(staleCutoff);
+
+  let neverAttempted = 0;
+  let stale = 0;
+  let failedInBackoff = 0;
+
+  for (const c of candidates) {
+    if (c.last_enrichment_attempt_at === null) {
+      neverAttempted++;
+    } else if (
+      c.last_enrichment_success_at !== null &&
+      c.last_enrichment_success_at < staleCutoff
+    ) {
+      stale++;
+    }
+    if (
+      c.last_enrichment_error !== null &&
+      c.last_enrichment_attempt_at !== null
+    ) {
+      const assetBackoff = backoffMs(c.enrichment_attempts);
+      const cutoff = new Date(now - assetBackoff).toISOString();
+      if (c.last_enrichment_attempt_at >= cutoff) {
+        failedInBackoff++;
+      }
+    }
+  }
+
+  const row = {
+    total_eligible: candidates.length,
+    never_attempted: neverAttempted,
+    stale,
+    failed_in_backoff: failedInBackoff,
   };
 
   const last = db
@@ -99,16 +142,34 @@ export function queueStatus(db: Database): QueueStatus {
   };
 }
 
-/** Pick the next N asset ids that need enrichment, in priority order. */
+/**
+ * Pick the next N asset ids that need enrichment, in priority order.
+ *
+ * Uses progressive backoff: the SQL fetches a wider candidate pool
+ * (assets with errors are included), then the application filters out
+ * assets still inside their per-attempt exponential backoff window.
+ */
 export function pickNext(db: Database, limit: number): Array<{ id: string; name: string }> {
   const staleCutoff = new Date(Date.now() - STALE_MS).toISOString();
-  const backoffCutoff = new Date(Date.now() - BACKOFF_MS).toISOString();
-  return db
+  const now = Date.now();
+
+  // Fetch more candidates than needed so we can filter by per-asset
+  // backoff and still fill the requested `limit`.
+  const oversample = limit * 4;
+  const rows = db
     .query<
-      { id: string; name: string },
-      [string, string, string, number]
+      {
+        id: string;
+        name: string;
+        last_enrichment_attempt_at: string | null;
+        last_enrichment_error: string | null;
+        enrichment_attempts: number;
+      },
+      [string, string, number]
     >(
-      `SELECT id, name FROM assets
+      `SELECT id, name, last_enrichment_attempt_at, last_enrichment_error,
+              enrichment_attempts
+       FROM assets
        WHERE hidden = 0
          AND manufacturer IS NOT NULL AND manufacturer != ''
          AND model IS NOT NULL AND model != ''
@@ -116,12 +177,6 @@ export function pickNext(db: Database, limit: number): Array<{ id: string; name:
          AND (
            last_enrichment_success_at IS NULL
            OR last_enrichment_success_at < ?
-         )
-         -- and not inside the failure backoff window
-         AND NOT (
-           last_enrichment_error IS NOT NULL
-           AND last_enrichment_attempt_at IS NOT NULL
-           AND last_enrichment_attempt_at >= ?
          )
          -- skip assets that already have fresh links (success path may not
          -- have updated the state column for pre-migration rows)
@@ -135,7 +190,26 @@ export function pickNext(db: Database, limit: number): Array<{ id: string; name:
          created_at ASC
        LIMIT ?`,
     )
-    .all(staleCutoff, backoffCutoff, staleCutoff, limit);
+    .all(staleCutoff, staleCutoff, oversample);
+
+  // Apply per-asset exponential backoff on the application side.
+  const result: Array<{ id: string; name: string }> = [];
+  for (const row of rows) {
+    if (result.length >= limit) break;
+    // If the last attempt was an error, check per-asset backoff.
+    if (
+      row.last_enrichment_error !== null &&
+      row.last_enrichment_attempt_at !== null
+    ) {
+      const assetBackoff = backoffMs(row.enrichment_attempts);
+      const cutoff = now - assetBackoff;
+      if (Date.parse(row.last_enrichment_attempt_at) > cutoff) {
+        continue; // still in backoff window — skip
+      }
+    }
+    result.push({ id: row.id, name: row.name });
+  }
+  return result;
 }
 
 /**
