@@ -1,5 +1,23 @@
 /// <reference path="../rules.d.ts" />
 
+/**
+ * Read a file that may not exist, returning null if absent.
+ *
+ * ctx.glob() skips dot-prefixed directories (e.g. `.github`) on some
+ * platforms — notably Windows — because the underlying glob library
+ * treats leading-dot segments as hidden and excludes them by default.
+ * For known fixed paths we bypass glob entirely and use ctx.readFile()
+ * inside a try/catch, which resolves the path directly without glob
+ * pattern matching.
+ */
+async function tryReadFile(ctx: RuleContext, path: string): Promise<string | null> {
+  try {
+    return await ctx.readFile(path);
+  } catch {
+    return null;
+  }
+}
+
 export default {
   rules: {
     "release-matrix-base-field": {
@@ -8,15 +26,13 @@ export default {
         "to the correct HA base image. Missing 'base' causes BUILD_FROM to default to amd64, " +
         "producing broken aarch64 images.",
       async check(ctx) {
-        const files = await ctx.glob(".github/workflows/release.yml");
-        if (files.length === 0) {
+        const content = await tryReadFile(ctx, ".github/workflows/release.yml");
+        if (content === null) {
           ctx.report.info({
             message: "No release.yml found at .github/workflows/release.yml",
           });
           return;
         }
-
-        const content = await ctx.readFile(".github/workflows/release.yml");
         const lines = content.split("\n");
 
         // Find matrix include blocks and check each entry has a 'base' field.
@@ -85,7 +101,9 @@ export default {
           }
 
           // Check for base field within current entry
-          if (currentArchLine >= 0 && /^\s+base:\s*\S+/.test(trimmed)) {
+          // Test against the raw line (not trimmed) because the regex
+          // expects leading whitespace from the YAML indentation.
+          if (currentArchLine >= 0 && /^\s+base:\s*\S+/.test(line)) {
             foundBase = true;
           }
 
@@ -115,15 +133,13 @@ export default {
         "docker/build-push-action. Without this, the Dockerfile defaults to amd64-base " +
         "for all architectures.",
       async check(ctx) {
-        const files = await ctx.glob(".github/workflows/release.yml");
-        if (files.length === 0) {
+        const content = await tryReadFile(ctx, ".github/workflows/release.yml");
+        if (content === null) {
           ctx.report.info({
             message: "No release.yml found at .github/workflows/release.yml",
           });
           return;
         }
-
-        const content = await ctx.readFile(".github/workflows/release.yml");
 
         // Check that BUILD_FROM appears in a build-args block
         const hasBuildFrom = /build-args:\s*\|?\s*\n\s*BUILD_FROM=/.test(content) ||
