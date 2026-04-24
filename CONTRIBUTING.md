@@ -56,6 +56,41 @@ bun run dev
 Then browse to `http://localhost:8099`. The dev server reads / writes
 the same SQLite schema as production, under `./data/` in the repo.
 
+## CI / CD
+
+Two GitHub Actions workflows:
+
+| Workflow | Trigger | What it does |
+|----------|---------|--------------|
+| `build.yml` (CI) | Pull requests | Builds Docker images for amd64 + aarch64 (no push) and runs `bun run typecheck`. |
+| `release.yml` | Push to `main` | Builds + pushes images to GHCR, creates a GitHub Release if the version tag is new. |
+
+### How to release
+
+Releases are fully automated. No manual GitHub Release creation needed.
+
+1. Bump `version` in [`house-inventory/config.yaml`](house-inventory/config.yaml).
+2. Update [`house-inventory/CHANGELOG.md`](house-inventory/CHANGELOG.md) — add
+   a `## [x.y.z]` section following [Keep a Changelog](https://keepachangelog.com/)
+   format. The release workflow extracts this section as the GitHub Release body.
+3. Merge the PR to `main`.
+
+On merge, `release.yml` automatically:
+- Reads the version from `config.yaml`
+- Builds and pushes `amd64` + `aarch64` images to
+  `ghcr.io/rhuanbarreto/ha-house-inventory/{arch}-house-inventory:{version}`
+- Creates a GitHub Release tagged `v{version}` with the changelog section
+
+The `image` field in `config.yaml` points at these GHCR images, so users
+who add the repo get fast pre-built installs instead of on-device builds.
+
+### Version numbering
+
+We use [semver](https://semver.org/):
+- **Patch** (0.2.1) — bug fixes, brand-seed additions, small UI tweaks.
+- **Minor** (0.3.0) — new features, new config options, DB migrations.
+- **Major** (1.0.0) — breaking changes (schema, config, API).
+
 ## VS Code devcontainer
 
 A `.devcontainer.json` is included at the repo root for the HA

@@ -52,9 +52,9 @@ backup contains your whole inventory — database and manual PDFs included.
 3. Paste this URL: `https://github.com/rhuanbarreto/ha-house-inventory`
 4. Close the dialog and refresh the store. A new section **HA House
    Inventory** appears with one card: **House Inventory**.
-5. Click the card → **Install**. The Supervisor clones the repo and
-   builds the Docker image on your HA host. This takes 5–10 minutes on
-   a Home Assistant Green (aarch64 Bun binary compilation).
+5. Click the card → **Install**. Pre-built images are pulled from GHCR
+   (fast). If no image is available for your version, the Supervisor
+   falls back to building from the Dockerfile on your device.
 6. Turn on **Watchdog** and **Start on boot** if you want those.
    **Start**. Open the web UI from the sidebar.
 
@@ -148,6 +148,18 @@ A `.devcontainer.json` is included at the repo root for the recommended
 HA devcontainer workflow. Open the repo in VS Code, choose "Reopen in
 Container", then run the "Start Home Assistant" task. The add-on appears
 automatically in the Local Add-ons store at `http://localhost:7123`.
+
+## Releasing
+
+Releases are fully automated via GitHub Actions. To ship a new version:
+
+1. Bump `version` in `house-inventory/config.yaml`.
+2. Add a `## [x.y.z]` section to `house-inventory/CHANGELOG.md`.
+3. Merge to `main`.
+
+That's it — the workflow builds multi-arch images, pushes them to GHCR,
+and creates a GitHub Release with the changelog as the body.
+See [CONTRIBUTING.md](CONTRIBUTING.md#ci--cd) for details.
 
 ## License
 

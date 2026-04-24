@@ -1,37 +1,92 @@
-name: Release add-on image
+name: Release add-on
+
+# Fully automated release pipeline:
+#   1. Push to main (with house-inventory/ changes) triggers this workflow.
+#   2. It reads the version from config.yaml.
+#   3. Builds + pushes Docker images for amd64 and aarch64 to GHCR.
+#   4. If a GitHub Release for that version doesn't exist yet, creates one
+#      with the matching CHANGELOG.md section as the body.
+#
+# To release: bump `version` in config.yaml, update CHANGELOG.md, merge to main.
 
 on:
-  release:
-    types: [published]
+  push:
+    branches: [main]
+    paths:
+      - "house-inventory/**"
+      - ".github/workflows/release.yml"
   workflow_dispatch:
 
-# Permissions required for GHCR push + Cosign OIDC signing.
 permissions:
-  contents: read
+  contents: write
   packages: write
   id-token: write
 
 jobs:
-  init:
-    name: Detect changed apps
+  # --------------------------------------------------------------------------
+  # 1. Extract version + changelog, decide whether to create a release.
+  # --------------------------------------------------------------------------
+  prepare:
+    name: Prepare release metadata
     runs-on: ubuntu-latest
     outputs:
-      changed_addons: ${{ steps.changed.outputs.addons }}
-      changed: ${{ steps.changed.outputs.changed }}
+      version: ${{ steps.meta.outputs.version }}
+      tag: ${{ steps.meta.outputs.tag }}
+      tag_exists: ${{ steps.meta.outputs.tag_exists }}
+      changelog: ${{ steps.changelog.outputs.body }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
-      - name: Find changed apps
-        id: changed
+      - name: Extract version from config.yaml
+        id: meta
         run: |
-          echo 'addons=["house-inventory"]' >> "$GITHUB_OUTPUT"
-          echo 'changed=true' >> "$GITHUB_OUTPUT"
+          VERSION=$(grep '^version:' house-inventory/config.yaml \
+            | sed 's/version: *"\?\([^"]*\)"\?/\1/')
+          TAG="v${VERSION}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
 
+          # Check if this tag already exists (release already created).
+          if git rev-parse "refs/tags/${TAG}" >/dev/null 2>&1; then
+            echo "tag_exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag_exists=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "Version: ${VERSION}, Tag: ${TAG}"
+
+      - name: Extract changelog section for this version
+        id: changelog
+        run: |
+          # Extract the section between ## [<version>] and the next ## [
+          BODY=$(awk -v ver="${{ steps.meta.outputs.version }}" '
+            /^## \[/ {
+              if (found) exit
+              if (index($0, "[" ver "]")) { found=1; next }
+            }
+            found { print }
+          ' house-inventory/CHANGELOG.md)
+
+          # If no section found, use a default message.
+          if [ -z "$BODY" ]; then
+            BODY="Release ${VERSION}"
+          fi
+
+          # Write to output using delimiter to handle multiline.
+          {
+            echo "body<<CHANGELOG_EOF"
+            echo "$BODY"
+            echo "CHANGELOG_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+  # --------------------------------------------------------------------------
+  # 2. Build and push Docker images for each architecture.
+  # --------------------------------------------------------------------------
   build:
-    name: Build & push ${{ matrix.arch }}
-    needs: init
-    if: needs.init.outputs.changed == 'true'
+    name: Build & push (${{ matrix.arch }})
+    needs: prepare
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -45,7 +100,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Set up QEMU (needed for aarch64 cross-build)
+      - name: Set up QEMU
         if: matrix.arch != 'amd64'
         uses: docker/setup-qemu-action@v3
         with:
@@ -61,13 +116,7 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract version from config.yaml
-        id: version
-        run: |
-          VERSION=$(grep '^version:' house-inventory/config.yaml | sed 's/version: *"\{0,1\}\([^"]*\)"\{0,1\}/\1/')
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-
-      - name: Build and push image
+      - name: Build and push
         uses: docker/build-push-action@v6
         with:
           context: ./house-inventory
@@ -75,12 +124,34 @@ jobs:
           platforms: ${{ matrix.platform }}
           push: true
           tags: |
-            ghcr.io/${{ github.repository_owner }}/ha-house-inventory/${{ matrix.arch }}-house-inventory:${{ steps.version.outputs.version }}
+            ghcr.io/${{ github.repository_owner }}/ha-house-inventory/${{ matrix.arch }}-house-inventory:${{ needs.prepare.outputs.version }}
             ghcr.io/${{ github.repository_owner }}/ha-house-inventory/${{ matrix.arch }}-house-inventory:latest
-          cache-from: type=gha,scope=${{ matrix.arch }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
+          cache-from: type=gha,scope=release-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=release-${{ matrix.arch }}
           labels: |
             io.hass.name=House Inventory
             io.hass.type=addon
             io.hass.arch=${{ matrix.arch }}
-            io.hass.version=${{ steps.version.outputs.version }}
+            io.hass.version=${{ needs.prepare.outputs.version }}
+
+  # --------------------------------------------------------------------------
+  # 3. Create a GitHub Release (only if the version tag is new).
+  # --------------------------------------------------------------------------
+  release:
+    name: Create GitHub Release
+    needs: [prepare, build]
+    if: needs.prepare.outputs.tag_exists == 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.prepare.outputs.tag }}
+          name: ${{ needs.prepare.outputs.tag }}
+          body: ${{ needs.prepare.outputs.changelog }}
+          draft: false
+          prerelease: false
+          generate_release_notes: false

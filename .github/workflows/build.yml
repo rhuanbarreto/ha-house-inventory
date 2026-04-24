@@ -1,20 +1,14 @@
-name: Build add-on image
+name: CI
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "house-inventory/**"
-      - ".github/workflows/build.yml"
   pull_request:
     paths:
       - "house-inventory/**"
       - ".github/workflows/build.yml"
   workflow_dispatch:
 
-# We never push images in CI — this workflow exists to prove the add-on
-# Dockerfile still builds on every PR, before a user discovers it at
-# install time. Pushing to a registry is a separate "release" workflow.
+# Validates that the Dockerfile builds and types check on every PR.
+# Pushing images to GHCR happens in release.yml (on merge to main).
 jobs:
   build:
     name: build ${{ matrix.arch }}
