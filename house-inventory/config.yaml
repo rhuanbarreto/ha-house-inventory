@@ -1,5 +1,5 @@
 name: House Inventory
-version: "0.2.1"
+version: "0.2.2"
 slug: house-inventory
 description: Track house assets — Home Assistant devices plus manual entries — with auto-enriched manuals and support links.
 url: https://github.com/rhuanbarreto/ha-house-inventory/tree/main/house-inventory

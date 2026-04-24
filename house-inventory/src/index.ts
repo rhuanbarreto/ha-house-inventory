@@ -711,7 +711,8 @@ console.log(
   `[house-inventory] starting — mode=${config.mode} port=${config.port} data=${config.dataDir}`,
 );
 
-export default {
+Bun.serve({
   port: config.port,
+  hostname: "0.0.0.0",
   fetch: app.fetch,
-};
+});
