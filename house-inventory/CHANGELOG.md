@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.2.1] — 2025-04-25
+
+### Fixed
+
+- Release workflow was missing `BUILD_FROM` build-arg, causing aarch64
+  Docker images to use the amd64 base image. This produced
+  `exec /init: exec format error` on ARM devices (Raspberry Pi, HA Green).
+
+### Added
+
+- Archgate governance with 6 ADRs covering architecture, backend, and
+  frontend conventions, plus 4 automated compliance rules.
+- `archgate check` CI job using `archgate/check-action@v1` — runs ADR
+  compliance checks on every PR with inline annotations.
+- Branch ruleset on `main` requiring all CI checks to pass before merge.
+
 ## [0.2.0] — unreleased
 
 ### Added
