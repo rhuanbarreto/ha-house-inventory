@@ -1,17 +1,15 @@
 /**
  * House Inventory — entrypoint.
  *
- * Two surfaces on one Hono app:
- *   - `/api/*`  JSON endpoints (scripting / HA automations / internal UI)
- *   - top-level HTML pages for humans (dashboard, assets, LLM picker).
- *
- * All mutating actions go through `/api/*` and either respond with JSON
- * (Accept: application/json) or redirect back to an HTML page with a
- * `?flash=<kind>:<text>` query param so the user sees the result.
+ * Pure JSON API server + static file host for the React SPA.
+ *   - `/api/*`    JSON endpoints (SPA, scripting, HA automations)
+ *   - `/static/*` Bundled frontend assets (JS, CSS)
+ *   - `GET *`     SPA catch-all — serves index.html with ingress path injected
+ *   - `/healthz`  Container health check
  */
 
 import { Hono } from "hono";
-import type { Context } from "hono";
+import { serveStatic } from "hono/bun";
 import { loadConfig } from "./config.ts";
 import { HaClient } from "./ha-client.ts";
 import { openDatabase } from "./db.ts";
@@ -20,17 +18,9 @@ import { clearSetting, getSetting, setSetting } from "./settings.ts";
 import { enrichAsset } from "./enrich.ts";
 import { queueStatus, runBatch } from "./enrich-batch.ts";
 import { getInFlightBatch, setInFlightBatch } from "./batch-state.ts";
-import { renderDashboard } from "./ui/dashboard.ts";
-import {
-  renderAssetDetail,
-  renderAssetList,
-  renderNewAssetForm,
-} from "./ui/assets.ts";
-import { renderLlmPage } from "./ui/llm.ts";
-import { renderAreasPage } from "./ui/areas.ts";
-import { escapeHtml } from "./ui/layout.ts";
 import { randomUUID } from "node:crypto";
 import { existsSync, statSync } from "node:fs";
+import { join } from "node:path";
 
 const SYNC_INTERVAL_MS = 15 * 60 * 1000;
 /** How often the background enrichment tick fires. */
@@ -42,79 +32,148 @@ const config = loadConfig();
 const ha = new HaClient(config);
 const db = openDatabase(config.dataDir);
 
+/** Directory containing the built SPA (index.html, JS, CSS). */
+const STATIC_DIR = process.env.STATIC_DIR ?? join(import.meta.dir, "..", "dist", "static");
+
 const app = new Hono();
-
-// ===========================================================================
-//   HTML pages
-// ===========================================================================
-
-/**
- * Compute the base URL for relative links on a page.
- * Dev: "/". Behind HA Ingress: `${X-Ingress-Path}/` so the browser resolves
- * relative URLs to the ingress-prefixed path (ingress strips the prefix
- * again on the way in, so our routes stay at /, /assets, /api/*, etc.).
- */
-function baseHrefFor(c: Context): string {
-  const ingress = c.req.header("x-ingress-path");
-  if (ingress && ingress.length > 0) {
-    return ingress.endsWith("/") ? ingress : `${ingress}/`;
-  }
-  return "/";
-}
-
-app.get("/", (c) =>
-  c.html(renderDashboard(db, config, c.req.query("flash"), baseHrefFor(c))),
-);
-
-app.get("/assets", (c) =>
-  c.html(
-    renderAssetList(
-      db,
-      {
-        q: c.req.query("q"),
-        area: c.req.query("area"),
-        hidden: c.req.query("hidden") as "0" | "1" | undefined,
-      },
-      c.req.query("flash"),
-      baseHrefFor(c),
-    ),
-  ),
-);
-
-app.get("/assets/new", (c) =>
-  c.html(renderNewAssetForm(db, c.req.query("flash"), baseHrefFor(c))),
-);
-
-app.get("/assets/:id", (c) => {
-  const html = renderAssetDetail(
-    db,
-    c.req.param("id"),
-    c.req.query("flash"),
-    baseHrefFor(c),
-  );
-  if (!html) return c.notFound();
-  return c.html(html);
-});
-
-app.get("/areas", (c) =>
-  c.html(renderAreasPage(db, c.req.query("flash"), baseHrefFor(c))),
-);
-
-app.get("/llm", async (c) => {
-  const html = await renderLlmPage(db, ha, c.req.query("flash"), baseHrefFor(c));
-  return c.html(html);
-});
 
 // ---- Health (kept at root for container health checks) --------------------
 app.get("/healthz", (c) => c.text("ok"));
 
 // ===========================================================================
-//   /api — JSON + form handlers
+//   /api — JSON endpoints
 // ===========================================================================
 
 const api = new Hono();
 
-// ---- Assets list + detail (JSON) ------------------------------------------
+// ---- Config (SPA bootstrap) ------------------------------------------------
+
+api.get("/config", (c) => {
+  return c.json({
+    ingressPath: c.req.header("x-ingress-path") ?? "",
+    mode: config.mode,
+  });
+});
+
+// ---- Dashboard (aggregated stats for SPA) -----------------------------------
+
+api.get("/dashboard", (c) => {
+  const totals = db
+    .query<
+      {
+        total: number;
+        visible: number;
+        hidden: number;
+        manual: number;
+        with_links: number;
+        with_pdf: number;
+        areas: number;
+      },
+      []
+    >(
+      `SELECT
+         (SELECT COUNT(*) FROM assets)                              AS total,
+         (SELECT COUNT(*) FROM assets WHERE hidden=0)               AS visible,
+         (SELECT COUNT(*) FROM assets WHERE hidden=1)               AS hidden,
+         (SELECT COUNT(*) FROM assets WHERE source='manual')        AS manual,
+         (SELECT COUNT(DISTINCT asset_id) FROM asset_links)         AS with_links,
+         (SELECT COUNT(DISTINCT asset_id) FROM asset_files)         AS with_pdf,
+         (SELECT COUNT(*) FROM areas)                               AS areas`,
+    )
+    .get();
+
+  const lastSync = db
+    .query<
+      {
+        started_at: string;
+        finished_at: string | null;
+        error: string | null;
+        devices_added: number;
+        devices_updated: number;
+      },
+      []
+    >(
+      `SELECT started_at, finished_at, error, devices_added, devices_updated
+       FROM ha_sync_log ORDER BY id DESC LIMIT 1`,
+    )
+    .get();
+
+  const llmEntityId = getSetting(db, "llm_entity_id");
+  const enrichStatus = queueStatus(db);
+  const enriched = db
+    .query<{ c: number }, []>(
+      `SELECT COUNT(DISTINCT asset_id) AS c FROM asset_links`,
+    )
+    .get()?.c ?? 0;
+  const inFlight = getInFlightBatch();
+
+  return c.json({
+    totals: totals ?? {
+      total: 0, visible: 0, hidden: 0, manual: 0, with_links: 0, with_pdf: 0, areas: 0,
+    },
+    lastSync: lastSync ?? null,
+    llmEntityId,
+    enrichStatus,
+    enriched,
+    inFlight,
+    mode: config.mode,
+    dataDir: config.dataDir,
+  });
+});
+
+// ---- Areas with floor groupings ---------------------------------------------
+
+api.get("/areas", (c) => {
+  const floors = db
+    .query<
+      { id: string; name: string; icon: string | null; level: number | null },
+      []
+    >(
+      `SELECT id, name, icon, level FROM floors
+       ORDER BY COALESCE(level, 0), name`,
+    )
+    .all();
+
+  const areas = db
+    .query<
+      {
+        id: string;
+        name: string;
+        icon: string | null;
+        floor_id: string | null;
+        visible_count: number;
+        hidden_count: number;
+        enriched_count: number;
+      },
+      []
+    >(
+      `SELECT
+         ar.id,
+         ar.name,
+         ar.icon,
+         ar.floor_id,
+         (SELECT COUNT(*) FROM assets a
+            WHERE a.area_id = ar.id AND a.hidden = 0) AS visible_count,
+         (SELECT COUNT(*) FROM assets a
+            WHERE a.area_id = ar.id AND a.hidden = 1) AS hidden_count,
+         (SELECT COUNT(DISTINCT l.asset_id) FROM asset_links l
+            INNER JOIN assets a ON a.id = l.asset_id
+            WHERE a.area_id = ar.id AND a.hidden = 0) AS enriched_count
+       FROM areas ar
+       ORDER BY ar.name`,
+    )
+    .all();
+
+  const unassignedAssets = db
+    .query<{ c: number }, []>(
+      "SELECT COUNT(*) AS c FROM assets WHERE area_id IS NULL AND hidden = 0",
+    )
+    .get()?.c ?? 0;
+
+  return c.json({ floors, areas, unassignedAssets });
+});
+
+// ---- Assets list + detail ---------------------------------------------------
 
 api.get("/assets", (c) => {
   const showHidden = c.req.query("hidden") === "1";
@@ -124,6 +183,14 @@ api.get("/assets", (c) => {
   if (area) {
     where.push("area_id = ?");
     params.push(area);
+  }
+  const q = c.req.query("q");
+  if (q && q.trim().length > 0) {
+    const term = `%${q.trim()}%`;
+    where.push(
+      "(name LIKE ? OR COALESCE(manufacturer,'') LIKE ? OR COALESCE(model,'') LIKE ?)",
+    );
+    params.push(term, term, term);
   }
   const rows = db
     .query(
@@ -155,23 +222,34 @@ api.get("/assets/:id", (c) => {
   return c.json({ asset, links, files });
 });
 
-// ---- Create manual asset --------------------------------------------------
+// ---- Create manual asset (JSON body) ----------------------------------------
 
 api.post("/assets", async (c) => {
-  const form = await c.req.formData();
-  const name = String(form.get("name") ?? "").trim();
+  const body = (await c.req.json().catch(() => null)) as {
+    name?: string;
+    manufacturer?: string | null;
+    model?: string | null;
+    category?: string | null;
+    area_id?: string | null;
+    purchase_date?: string | null;
+    purchase_price?: string | null;
+    warranty_until?: string | null;
+    notes?: string | null;
+  } | null;
+
+  const name = (body?.name ?? "").trim();
   if (name.length === 0) {
-    return redirectWithFlash(c, "/assets/new", "err:Name is required");
+    return c.json({ error: "Name is required" }, 400);
   }
 
-  const manufacturer = strOrNull(form.get("manufacturer"));
-  const model = strOrNull(form.get("model"));
-  const category = strOrNull(form.get("category"));
-  const areaId = strOrNull(form.get("area_id"));
-  const purchaseDate = strOrNull(form.get("purchase_date"));
-  const warrantyUntil = strOrNull(form.get("warranty_until"));
-  const notes = strOrNull(form.get("notes"));
-  const priceCents = parsePriceCents(form.get("purchase_price"));
+  const manufacturer = body?.manufacturer?.trim() || null;
+  const model = body?.model?.trim() || null;
+  const category = body?.category?.trim() || null;
+  const areaId = body?.area_id || null;
+  const purchaseDate = body?.purchase_date || null;
+  const warrantyUntil = body?.warranty_until || null;
+  const notes = body?.notes?.trim() || null;
+  const priceCents = parsePriceCents(body?.purchase_price ?? null);
 
   const id = `manual_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
   const now = new Date().toISOString();
@@ -183,57 +261,46 @@ api.post("/assets", async (c) => {
        hidden, hidden_reason, created_at, updated_at, last_seen_at
      ) VALUES (?, 'manual', NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, ?)`,
     [
-      id,
-      name,
-      manufacturer,
-      model,
-      areaId,
-      category,
-      purchaseDate,
-      priceCents,
-      warrantyUntil,
-      notes,
-      now,
-      now,
-      now,
+      id, name, manufacturer, model, areaId, category,
+      purchaseDate, priceCents, warrantyUntil, notes, now, now, now,
     ],
   );
 
-  return redirectWithFlash(c, `/assets/${id}`, `ok:Created ${name}`);
+  return c.json({ id, name });
 });
 
 api.post("/assets/:id/edit", async (c) => {
   const assetId = c.req.param("id");
-  const form = await c.req.formData();
   const exists = db
     .query<{ id: string }, [string]>("SELECT id FROM assets WHERE id = ?")
     .get(assetId);
   if (!exists) return c.json({ error: "not found" }, 404);
 
-  const category = strOrNull(form.get("category"));
-  const areaId = strOrNull(form.get("area_id"));
-  const purchaseDate = strOrNull(form.get("purchase_date"));
-  const warrantyUntil = strOrNull(form.get("warranty_until"));
-  const notes = strOrNull(form.get("notes"));
-  const priceCents = parsePriceCents(form.get("purchase_price"));
+  const body = (await c.req.json().catch(() => null)) as {
+    category?: string | null;
+    area_id?: string | null;
+    purchase_date?: string | null;
+    purchase_price?: string | null;
+    warranty_until?: string | null;
+    notes?: string | null;
+  } | null;
+
+  const category = body?.category?.trim() || null;
+  const areaId = body?.area_id || null;
+  const purchaseDate = body?.purchase_date || null;
+  const warrantyUntil = body?.warranty_until || null;
+  const notes = body?.notes?.trim() || null;
+  const priceCents = parsePriceCents(body?.purchase_price ?? null);
 
   db.run(
     `UPDATE assets SET
        category=?, area_id=?, purchase_date=?, purchase_price_cents=?,
        warranty_until=?, notes=?, updated_at=?
      WHERE id=?`,
-    [
-      category,
-      areaId,
-      purchaseDate,
-      priceCents,
-      warrantyUntil,
-      notes,
-      new Date().toISOString(),
-      assetId,
-    ],
+    [category, areaId, purchaseDate, priceCents, warrantyUntil, notes,
+      new Date().toISOString(), assetId],
   );
-  return redirectWithFlash(c, `/assets/${assetId}`, "ok:Saved");
+  return c.json({ ok: true });
 });
 
 api.post("/assets/:id/toggle-hidden", (c) => {
@@ -247,18 +314,9 @@ api.post("/assets/:id/toggle-hidden", (c) => {
   const next = row.hidden ? 0 : 1;
   db.run(
     `UPDATE assets SET hidden=?, hidden_reason=?, updated_at=? WHERE id=?`,
-    [
-      next,
-      next === 1 ? "manual_hide" : null,
-      new Date().toISOString(),
-      assetId,
-    ],
+    [next, next === 1 ? "manual_hide" : null, new Date().toISOString(), assetId],
   );
-  return redirectWithFlash(
-    c,
-    `/assets/${assetId}`,
-    next === 1 ? "ok:Hidden" : "ok:Unhidden",
-  );
+  return c.json({ hidden: next === 1 });
 });
 
 api.post("/assets/:id/delete", (c) => {
@@ -270,31 +328,17 @@ api.post("/assets/:id/delete", (c) => {
     .get(assetId);
   if (!row) return c.json({ error: "not found" }, 404);
   if (row.source !== "manual") {
-    return redirectWithFlash(
-      c,
-      `/assets/${assetId}`,
-      "err:Only manual assets can be deleted",
-    );
+    return c.json({ error: "Only manual assets can be deleted" }, 400);
   }
   db.run("DELETE FROM assets WHERE id = ?", [assetId]);
-  return redirectWithFlash(c, "/assets", `ok:Deleted ${row.name}`);
+  return c.json({ ok: true });
 });
 
-// ---- Sync ------------------------------------------------------------------
+// ---- Sync -------------------------------------------------------------------
 
 api.post("/sync", async (c) => {
   const result = await syncFromHomeAssistant(db, ha);
-  const accept = c.req.header("accept") ?? "";
-  if (accept.includes("application/json")) {
-    return c.json(result, result.error ? 500 : 200);
-  }
-  return redirectWithFlash(
-    c,
-    "/",
-    result.error
-      ? `err:Sync failed — ${result.error}`
-      : `ok:Synced — +${result.devicesAdded} added, ${result.devicesUpdated} updated`,
-  );
+  return c.json(result, result.error ? 500 : 200);
 });
 
 api.get("/sync/history", (c) => {
@@ -304,7 +348,7 @@ api.get("/sync/history", (c) => {
   return c.json(rows);
 });
 
-// ---- LLM -------------------------------------------------------------------
+// ---- LLM --------------------------------------------------------------------
 
 api.get("/llm", async (c) => {
   try {
@@ -328,27 +372,25 @@ api.get("/llm", async (c) => {
   }
 });
 
+// POST kept for backwards compat but now JSON-only
 api.post("/settings/llm", async (c) => {
-  const form = await c.req.formData();
-  const id = String(form.get("entity_id") ?? "").trim();
-  if (!id) {
-    return redirectWithFlash(c, "/llm", "err:entity_id is required");
-  }
+  const body = (await c.req.json().catch(() => null)) as {
+    entity_id?: string;
+  } | null;
+  const id = body?.entity_id?.trim();
+  if (!id) return c.json({ error: "entity_id is required" }, 400);
   const discovered = await ha.discoverLlmEntities();
   const match = discovered.find((e) => e.entity_id === id);
   if (!match) {
-    return redirectWithFlash(c, "/llm", `err:Not found in HA: ${id}`);
+    return c.json(
+      { error: `entity_id not found: ${id}`, available: discovered.map((e) => e.entity_id) },
+      404,
+    );
   }
   setSetting(db, "llm_entity_id", id);
-  return redirectWithFlash(c, "/llm", `ok:Selected ${id}`);
+  return c.json({ ok: true, entity_id: id, kind: match.kind });
 });
 
-api.post("/settings/llm/clear", (c) => {
-  clearSetting(db, "llm_entity_id");
-  return redirectWithFlash(c, "/llm", "ok:Cleared");
-});
-
-// Legacy JSON handlers kept for scripting.
 api.put("/settings/llm", async (c) => {
   const body = (await c.req.json().catch(() => null)) as {
     entity_id?: string;
@@ -365,6 +407,11 @@ api.put("/settings/llm", async (c) => {
   }
   setSetting(db, "llm_entity_id", id);
   return c.json({ ok: true, entity_id: id, kind: match.kind });
+});
+
+api.post("/settings/llm/clear", (c) => {
+  clearSetting(db, "llm_entity_id");
+  return c.json({ ok: true });
 });
 
 api.delete("/settings/llm", (c) => {
@@ -390,30 +437,14 @@ api.get("/llm/creatable", async (c) => {
 });
 
 api.post("/llm/create", async (c) => {
-  const isForm =
-    (c.req.header("content-type") ?? "").startsWith(
-      "application/x-www-form-urlencoded",
-    ) ||
-    (c.req.header("content-type") ?? "").startsWith("multipart/form-data");
-
-  let entryId: string | undefined;
-  let options: Record<string, unknown> = {};
-  if (isForm) {
-    const form = await c.req.formData();
-    entryId = String(form.get("entry_id") ?? "").trim();
-    const model = String(form.get("model") ?? "").trim();
-    if (model) options["model"] = model;
-  } else {
-    const body = (await c.req.json().catch(() => null)) as {
-      entry_id?: string;
-      options?: Record<string, unknown>;
-    } | null;
-    entryId = body?.entry_id;
-    options = body?.options ?? {};
-  }
+  const body = (await c.req.json().catch(() => null)) as {
+    entry_id?: string;
+    options?: Record<string, unknown>;
+  } | null;
+  const entryId = body?.entry_id;
+  const options = body?.options ?? {};
 
   if (!entryId) {
-    if (isForm) return redirectWithFlash(c, "/llm", "err:entry_id required");
     return c.json({ error: "entry_id is required" }, 400);
   }
 
@@ -429,14 +460,10 @@ api.post("/llm/create", async (c) => {
   }
   if (step.type === "form") {
     await ha.cancelSubentryFlow(step.flow_id);
-    const msg = "Creation needed too many steps — aborted";
-    if (isForm) return redirectWithFlash(c, "/llm", `err:${msg}`);
-    return c.json({ error: msg }, 500);
+    return c.json({ error: "Creation needed too many steps — aborted" }, 500);
   }
   if (step.type === "abort") {
-    const msg = `Aborted: ${step.reason}`;
-    if (isForm) return redirectWithFlash(c, "/llm", `err:${msg}`);
-    return c.json({ error: msg }, 400);
+    return c.json({ error: `Aborted: ${step.reason}` }, 400);
   }
 
   let newEntityId: string | null = null;
@@ -454,16 +481,10 @@ api.post("/llm/create", async (c) => {
 
   if (newEntityId) {
     setSetting(db, "llm_entity_id", newEntityId);
-    if (isForm) {
-      return redirectWithFlash(c, "/llm", `ok:Created ${newEntityId}`);
-    }
     return c.json({ ok: true, entity_id: newEntityId, auto_selected: true });
   }
 
-  const msg =
-    "Subentry created but entity didn't surface — refresh /llm in a moment.";
-  if (isForm) return redirectWithFlash(c, "/llm", `info:${msg}`);
-  return c.json({ ok: true, entity_id: null, note: msg });
+  return c.json({ ok: true, entity_id: null, note: "Subentry created but entity didn't surface — refresh in a moment." });
 });
 
 api.get("/llm/create/schema", async (c) => {
@@ -482,60 +503,35 @@ api.get("/llm/create/schema", async (c) => {
   }
 });
 
-// ---- Enrich ---------------------------------------------------------------
-//
-// Route order matters: the specific paths (/enrich/status, /enrich/batch)
-// MUST come before /enrich/:assetId, otherwise Hono matches the wildcard
-// first and treats "batch" / "status" as asset ids.
+// ---- Enrich -----------------------------------------------------------------
 
 api.get("/enrich/status", (c) => {
   return c.json(queueStatus(db));
 });
 
-// Batch enrichment is long-running (~30s per asset × N). Running it
-// synchronously inside the HTTP handler held the client connection open
-// for minutes, and HA Ingress's reverse proxy would time it out and flag
-// the add-on as "not ready". We now fire-and-forget: the POST returns
-// immediately, the batch runs in the background, and the dashboard shows
-// a "batch running" indicator until it finishes.
 api.post("/enrich/batch", async (c) => {
-  const accept = c.req.header("accept") ?? "";
-
-  // Accept `n` from query (GET-ish POST) or form body.
-  let max = Number(c.req.query("n") ?? "0");
-  if (!Number.isFinite(max) || max <= 0) {
-    const ct = c.req.header("content-type") ?? "";
-    if (ct.startsWith("application/x-www-form-urlencoded") || ct.startsWith("multipart/form-data")) {
-      const form = await c.req.formData().catch(() => null);
-      const fromForm = Number(form?.get("n") ?? "0");
-      if (Number.isFinite(fromForm) && fromForm > 0) max = fromForm;
-    }
-  }
+  const body = (await c.req.json().catch(() => null)) as { n?: number } | null;
+  let max = Number(body?.n ?? c.req.query("n") ?? 0);
   if (!Number.isFinite(max) || max <= 0) max = 5;
   max = Math.min(max, 50);
 
   const existing = getInFlightBatch();
   if (existing) {
-    const msg = `A batch of ${existing.max} is already running (started ${existing.startedAt}). Refresh to watch progress.`;
-    if (accept.includes("application/json")) {
-      return c.json({ error: msg, inFlight: existing }, 409);
-    }
-    return redirectWithFlash(c, "/", `info:${msg}`);
+    return c.json({
+      error: `A batch of ${existing.max} is already running (started ${existing.startedAt}).`,
+      inFlight: existing,
+    }, 409);
   }
 
-  // Fail fast if no LLM — otherwise the user gets a useless redirect and
-  // the background task immediately no-ops.
   if (!getSetting(db, "llm_entity_id")) {
-    const msg = "No LLM selected — pick one on the LLM page first";
-    if (accept.includes("application/json")) return c.json({ error: msg }, 400);
-    return redirectWithFlash(c, "/", `err:${msg}`);
+    return c.json({ error: "No LLM selected — pick one on the LLM page first" }, 400);
   }
 
   setInFlightBatch({ startedAt: new Date().toISOString(), max });
   // eslint-disable-next-line no-console
   console.log(`[batch] kicked off n=${max}`);
 
-  // Intentionally not awaited — the HTTP handler returns immediately.
+  // Fire-and-forget — the HTTP handler returns immediately.
   void runBatch(db, ha, config.dataDir, { max })
     .then((r) => {
       // eslint-disable-next-line no-console
@@ -551,45 +547,25 @@ api.post("/enrich/batch", async (c) => {
       setInFlightBatch(null);
     });
 
-  if (accept.includes("application/json")) {
-    return c.json({ ok: true, started: true, max });
-  }
-  return redirectWithFlash(
-    c,
-    "/",
-    `ok:Batch of ${max} started in the background — refresh to watch progress`,
-  );
+  return c.json({ ok: true, started: true, max });
 });
 
 api.get("/enrich/inflight", (c) => {
   return c.json({ inFlight: getInFlightBatch() });
 });
 
-// Single-asset enrich — defined AFTER the specific /enrich/status and
-// /enrich/batch routes so the wildcard doesn't eat them.
+// Single-asset enrich — AFTER /enrich/status and /enrich/batch
 api.post("/enrich/:assetId", async (c) => {
   const assetId = c.req.param("assetId");
-  const accept = c.req.header("accept") ?? "";
   try {
     const result = await enrichAsset(db, ha, config.dataDir, assetId);
-    if (accept.includes("application/json")) return c.json(result);
-    const linkCount = Object.values(result.links).filter(
-      (v) => typeof v === "string",
-    ).length;
-    return redirectWithFlash(
-      c,
-      `/assets/${assetId}`,
-      `ok:Enriched (${result.cache}) — ${linkCount} links${result.manual_downloaded ? ", manual PDF saved" : ""}`,
-    );
+    return c.json(result);
   } catch (err) {
-    const msg = (err as Error).message;
-    if (accept.includes("application/json"))
-      return c.json({ error: msg }, 500);
-    return redirectWithFlash(c, `/assets/${assetId}`, `err:${msg}`);
+    return c.json({ error: (err as Error).message }, 500);
   }
 });
 
-// ---- Files (serve downloaded PDFs) -----------------------------------------
+// ---- Files (serve downloaded PDFs) ------------------------------------------
 
 api.get("/files/:fileId", (c) => {
   const fileId = Number(c.req.param("fileId"));
@@ -618,43 +594,53 @@ api.get("/files/:fileId", (c) => {
 app.route("/api", api);
 
 // ===========================================================================
+//   Static file serving + SPA catch-all
+// ===========================================================================
+
+// Serve built frontend assets (JS, CSS) with long-lived cache (hashed names).
+app.use(
+  "/static/*",
+  serveStatic({
+    root: STATIC_DIR,
+    rewriteRequestPath: (path) => path.replace(/^\/static/, ""),
+  }),
+);
+
+// SPA catch-all: any route not handled above gets index.html with the
+// HA Ingress path injected into a meta tag so the SPA can read it
+// synchronously on boot.
+let indexHtmlTemplate: string | null = null;
+
+app.get("*", async (c) => {
+  if (indexHtmlTemplate === null) {
+    const indexPath = join(STATIC_DIR, "index.html");
+    try {
+      indexHtmlTemplate = await Bun.file(indexPath).text();
+    } catch {
+      return c.text("Frontend not built — run `bun run build` first.", 500);
+    }
+  }
+
+  const ingress = c.req.header("x-ingress-path") ?? "";
+  const html = indexHtmlTemplate.replace(
+    '<meta name="ingress-path" content="" />',
+    `<meta name="ingress-path" content="${ingress}" />`,
+  );
+  return c.html(html);
+});
+
+// ===========================================================================
 //   Helpers
 // ===========================================================================
 
-// FormData values can be strings or File. For our inputs they're all strings,
-// but TypeScript wants us to narrow rather than assume.
-type FormValue = string | File | null;
-
-function strOrNull(v: FormValue): string | null {
-  if (v === null) return null;
-  const s = String(v).trim();
-  return s.length === 0 ? null : s;
-}
-
-function parsePriceCents(v: FormValue): number | null {
-  if (v === null) return null;
+function parsePriceCents(v: string | null | undefined): number | null {
+  if (v == null) return null;
   const s = String(v).trim();
   if (s.length === 0) return null;
   const n = Number.parseFloat(s.replace(",", "."));
   if (!Number.isFinite(n)) return null;
   return Math.round(n * 100);
 }
-
-function redirectWithFlash(c: Context, path: string, flash: string): Response {
-  // Behind HA Ingress the addon is served at `${X-Ingress-Path}/…`. An
-  // absolute `Location: /foo` would escape the ingress prefix and send the
-  // browser to the HA origin root (the HA home page), so prepend the prefix
-  // when the header is present. In dev the header is absent and we emit a
-  // plain absolute path as before.
-  const ingress = c.req.header("x-ingress-path") ?? "";
-  const prefix = ingress.endsWith("/") ? ingress.slice(0, -1) : ingress;
-  const url = `${prefix}${path}?flash=${encodeURIComponent(flash)}`;
-  return c.redirect(url, 303);
-}
-
-// `escapeHtml` is imported only so tooling picks up the intent — UI modules
-// use it directly. Suppress "unused import" warnings.
-void escapeHtml;
 
 // ===========================================================================
 //   Background sync
