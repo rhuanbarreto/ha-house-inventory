@@ -1,13 +1,16 @@
 /**
  * Web search for enrichment.
  *
- * We scrape DuckDuckGo's HTML endpoint rather than using an API key —
- * good-enough quality for finding product pages / manual PDFs, no keys to
- * manage in the add-on config. Brave can be added later as an opt-in.
+ * Two providers:
+ *   - DuckDuckGo (default) — scrapes DDG's HTML endpoint. No API key needed.
+ *   - Brave Search — uses the Brave Search API. Requires a key from
+ *     https://brave.com/search/api/. Generally higher-quality results.
  *
- * Parsing uses Bun's built-in HTMLRewriter so we avoid pulling in a DOM
- * library. DDG's HTML response is stable enough (the lite variant is even
- * more so) but we're defensive about missing/empty elements.
+ * The dispatcher `webSearch()` picks the right backend based on the
+ * configured provider and is the only function callers need.
+ *
+ * Parsing of DDG results uses Bun's built-in HTMLRewriter so we avoid
+ * pulling in a DOM library.
  */
 
 export interface SearchResult {
@@ -15,6 +18,33 @@ export interface SearchResult {
   title: string;
   snippet: string;
 }
+
+export type SearchProvider = "duckduckgo" | "brave";
+
+export interface SearchConfig {
+  provider: SearchProvider;
+  braveApiKey?: string | null;
+}
+
+// ---- Dispatcher -------------------------------------------------------------
+
+export async function webSearch(
+  query: string,
+  limit: number,
+  config: SearchConfig,
+): Promise<SearchResult[]> {
+  if (config.provider === "brave") {
+    if (!config.braveApiKey) {
+      throw new Error(
+        "Brave Search selected but no API key configured — set brave_search_api_key in add-on options.",
+      );
+    }
+    return searchBrave(query, limit, config.braveApiKey);
+  }
+  return searchDuckDuckGo(query, limit);
+}
+
+// ---- DuckDuckGo -------------------------------------------------------------
 
 export async function searchDuckDuckGo(
   query: string,
@@ -113,4 +143,49 @@ function unwrapDdgRedirect(href: string): string {
     }
   }
   return href;
+}
+
+// ---- Brave Search -----------------------------------------------------------
+
+interface BraveWebResult {
+  url: string;
+  title: string;
+  description: string;
+}
+
+interface BraveSearchResponse {
+  web?: { results?: BraveWebResult[] };
+}
+
+async function searchBrave(
+  query: string,
+  limit: number,
+  apiKey: string,
+): Promise<SearchResult[]> {
+  const url = new URL("https://api.search.brave.com/res/v1/web/search");
+  url.searchParams.set("q", query);
+  url.searchParams.set("count", String(Math.min(limit, 20)));
+  url.searchParams.set("safesearch", "off");
+
+  const res = await fetch(url.toString(), {
+    headers: {
+      Accept: "application/json",
+      "Accept-Encoding": "gzip",
+      "X-Subscription-Token": apiKey,
+    },
+  });
+  if (!res.ok) {
+    throw new Error(
+      `Brave Search failed: ${res.status} ${res.statusText}`,
+    );
+  }
+
+  const data = (await res.json()) as BraveSearchResponse;
+  const webResults = data.web?.results ?? [];
+
+  return webResults.slice(0, limit).map((r) => ({
+    url: r.url,
+    title: r.title,
+    snippet: r.description ?? "",
+  }));
 }

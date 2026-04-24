@@ -22,8 +22,9 @@ Good candidates for a PR:
   a brand you can't verify the real support portal for.
 - Classifier improvements in [`house-inventory/src/filters.ts`](house-inventory/src/filters.ts)
   for categories of HA devices that keep getting misclassified.
-- UI polish (the HTML is deliberately lightweight, but there's plenty
-  of room).
+- UI polish — the frontend is a React 19 SPA with TanStack Router +
+  TanStack Query, styled with plain CSS (no CSS framework). Keep it
+  lightweight: no heavy UI libraries.
 - Bug fixes + extra test coverage.
 
 Things I probably won't merge:
@@ -31,8 +32,6 @@ Things I probably won't merge:
 - Model-recommendation changes ("switch to Claude for better results",
   "use GPT-5"). The model is the user's choice. Code-side improvements
   (better prompts, more validation) are always welcome.
-- Heavy frontend framework additions (React/Vue/Svelte/etc.). The UI
-  is intentionally build-free.
 - Feature that requires write access to HA's `/config` or any volume
   other than our own `/data`.
 
@@ -56,6 +55,13 @@ bun run dev
 
 Then browse to `http://localhost:8099`. The dev server reads / writes
 the same SQLite schema as production, under `./data/` in the repo.
+
+## VS Code devcontainer
+
+A `.devcontainer.json` is included at the repo root for the HA
+devcontainer workflow. Open the repo in VS Code → "Reopen in Container"
+→ run the "Start Home Assistant" task. The add-on appears automatically
+under Local Add-ons.
 
 ## License
 

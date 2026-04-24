@@ -117,8 +117,12 @@ export class HaClient {
   constructor(private readonly config: Config) {}
 
   private wsUrl(): string {
-    // http(s)://host → ws(s)://host/api/websocket
     const url = this.config.haBaseUrl;
+    if (this.config.mode === "addon") {
+      // Inside an add-on the documented path is ws://supervisor/core/websocket
+      return url.replace(/^http/, "ws") + "/websocket";
+    }
+    // Dev mode: direct connection → ws(s)://host/api/websocket
     return url.replace(/^http/, "ws") + "/api/websocket";
   }
 

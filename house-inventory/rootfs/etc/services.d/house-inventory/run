@@ -16,6 +16,7 @@ export BRAVE_SEARCH_API_KEY="$(bashio::config 'brave_search_api_key')"
 export HA_BASE_URL="http://supervisor/core"
 export HA_TOKEN="${SUPERVISOR_TOKEN}"
 export HA_MODE="addon"
+export STATIC_DIR="/usr/local/share/house-inventory/static"
 
 # The binary ships with the Bun runtime baked in by `bun build --compile`.
 exec /usr/local/bin/house-inventory

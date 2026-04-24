@@ -1,0 +1,86 @@
+name: Release add-on image
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+# Permissions required for GHCR push + Cosign OIDC signing.
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+jobs:
+  init:
+    name: Detect changed apps
+    runs-on: ubuntu-latest
+    outputs:
+      changed_addons: ${{ steps.changed.outputs.addons }}
+      changed: ${{ steps.changed.outputs.changed }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Find changed apps
+        id: changed
+        run: |
+          echo 'addons=["house-inventory"]' >> "$GITHUB_OUTPUT"
+          echo 'changed=true' >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build & push ${{ matrix.arch }}
+    needs: init
+    if: needs.init.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+          - arch: aarch64
+            platform: linux/arm64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up QEMU (needed for aarch64 cross-build)
+        if: matrix.arch != 'amd64'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract version from config.yaml
+        id: version
+        run: |
+          VERSION=$(grep '^version:' house-inventory/config.yaml | sed 's/version: *"\{0,1\}\([^"]*\)"\{0,1\}/\1/')
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./house-inventory
+          file: ./house-inventory/Dockerfile
+          platforms: ${{ matrix.platform }}
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/ha-house-inventory/${{ matrix.arch }}-house-inventory:${{ steps.version.outputs.version }}
+            ghcr.io/${{ github.repository_owner }}/ha-house-inventory/${{ matrix.arch }}-house-inventory:latest
+          cache-from: type=gha,scope=${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
+          labels: |
+            io.hass.name=House Inventory
+            io.hass.type=addon
+            io.hass.arch=${{ matrix.arch }}
+            io.hass.version=${{ steps.version.outputs.version }}

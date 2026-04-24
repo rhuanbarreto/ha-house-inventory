@@ -1,0 +1,34 @@
+#include <tunables/global>
+
+profile house-inventory flags=(attach_disconnected,mediate_deleted) {
+  #include <abstractions/base>
+
+  # Allow network access (HTTP to DDG/Brave, WebSocket to HA Core, PDF downloads).
+  network inet  stream,
+  network inet6 stream,
+  network inet  dgram,
+  network inet6 dgram,
+
+  # Allow reading/writing the persistent /data volume (SQLite, manuals).
+  /data/** rw,
+
+  # Allow reading the app binary and static assets.
+  /usr/local/bin/house-inventory ix,
+  /usr/local/share/house-inventory/** r,
+
+  # Allow reading S6-overlay service scripts.
+  /etc/services.d/** r,
+  /etc/services.d/house-inventory/run ix,
+
+  # Standard system paths the binary needs.
+  /proc/** r,
+  /sys/** r,
+  /etc/hosts r,
+  /etc/resolv.conf r,
+  /etc/nsswitch.conf r,
+  /etc/ssl/** r,
+  /usr/share/ca-certificates/** r,
+  /tmp/** rw,
+
+  # Deny everything else by default (implicit in AppArmor).
+}

@@ -19,6 +19,7 @@ import type { Database } from "bun:sqlite";
 import type { HaClient } from "./ha-client.ts";
 import { enrichAsset } from "./enrich.ts";
 import { getSetting } from "./settings.ts";
+import type { SearchConfig } from "./search.ts";
 
 const STALE_MS = 30 * 86_400_000; // 30 days
 const BACKOFF_MS = 6 * 3_600_000; // 6h after a failed attempt
@@ -175,6 +176,8 @@ export interface BatchOptions {
   max: number;
   /** Delay between assets, ms. Default 2000 — polite to DDG + LLM quotas. */
   interAssetDelayMs?: number;
+  /** Web search provider config. Falls back to DuckDuckGo when omitted. */
+  searchConfig?: SearchConfig;
 }
 
 export async function runBatch(
@@ -210,7 +213,7 @@ export async function runBatch(
     if (!c) continue;
     result.processed++;
     try {
-      const r = await enrichAsset(db, ha, dataDir, c.id);
+      const r = await enrichAsset(db, ha, dataDir, c.id, opts.searchConfig);
       // enrichAsset writes its own success state — no recordAttempt needed.
       result.succeeded++;
       if (r.cache === "hit") result.cacheHits++;

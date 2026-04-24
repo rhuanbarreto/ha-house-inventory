@@ -1,0 +1,14 @@
+configuration:
+  log_level:
+    name: Log level
+    description: Verbosity of the add-on logs (trace, debug, info, warning, error, fatal).
+  web_search_provider:
+    name: Web search provider
+    description: >-
+      Search engine used during asset enrichment.
+      DuckDuckGo requires no API key. Brave requires a Brave Search API key.
+  brave_search_api_key:
+    name: Brave Search API key
+    description: >-
+      API key for Brave Search (https://brave.com/search/api/).
+      Only required when web_search_provider is set to "brave".

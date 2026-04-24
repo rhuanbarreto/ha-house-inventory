@@ -1,5 +1,5 @@
 name: House Inventory
-version: "0.1.0"
+version: "0.2.0"
 slug: house-inventory
 description: Track house assets — Home Assistant devices plus manual entries — with auto-enriched manuals and support links.
 url: https://github.com/rhuanbarreto/ha-house-inventory/tree/main/house-inventory
@@ -9,9 +9,14 @@ arch:
 startup: application
 boot: auto
 init: false
+stage: experimental
+homeassistant: "2025.7.0"
+timeout: 30
+tmpfs: true
 
 # We need the Supervisor token to call HA Core API + the AI Task service.
 hassio_api: true
+hassio_role: default
 homeassistant_api: true
 
 # UI is served inside HA's sidebar via Ingress — no exposed port needed.
@@ -20,8 +25,21 @@ ingress_port: 8099
 panel_icon: mdi:package-variant-closed
 panel_title: House Inventory
 
+# Supervisor-level watchdog: auto-restart if healthz stops responding.
+watchdog: http://[HOST]:[PORT:8099]/healthz
+
+# Fallback web-UI URL when ingress is not available.
+webui: http://[HOST]:[PORT:8099]
+
 # /data is persistent and included in HA backups; this is where SQLite + PDFs live.
 # No extra map entries needed — /data is implicit.
+
+# Exclude transient SQLite WAL/SHM files from backups.
+backup_exclude:
+  - "*.db-shm"
+  - "*.db-wal"
+
+image: ghcr.io/rhuanbarreto/ha-house-inventory/{arch}-house-inventory
 
 options:
   log_level: info
@@ -29,7 +47,7 @@ options:
   brave_search_api_key: ""
 
 schema:
-  log_level: list(trace|debug|info|notice|info|warning|error|fatal)
+  log_level: list(trace|debug|info|notice|warning|error|fatal)
   web_search_provider: list(duckduckgo|brave)
   brave_search_api_key: password?
 
