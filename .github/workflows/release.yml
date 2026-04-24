@@ -94,8 +94,10 @@ jobs:
         include:
           - arch: amd64
             platform: linux/amd64
+            base: ghcr.io/home-assistant/amd64-base:3.19
           - arch: aarch64
             platform: linux/arm64
+            base: ghcr.io/home-assistant/aarch64-base:3.19
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -122,6 +124,8 @@ jobs:
           context: ./house-inventory
           file: ./house-inventory/Dockerfile
           platforms: ${{ matrix.platform }}
+          build-args: |
+            BUILD_FROM=${{ matrix.base }}
           push: true
           tags: |
             ghcr.io/${{ github.repository_owner }}/ha-house-inventory/${{ matrix.arch }}-house-inventory:${{ needs.prepare.outputs.version }}
