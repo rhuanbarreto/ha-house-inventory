@@ -4,6 +4,11 @@
 export interface AppConfig {
   ingressPath: string;
   mode: string;
+  user: {
+    id: string | null;
+    name: string | null;
+    displayName: string | null;
+  };
 }
 
 // -- Dashboard --
@@ -54,6 +59,7 @@ export interface AssetListItem {
   manufacturer: string | null;
   model: string | null;
   area_id: string | null;
+  area_name: string | null;
   source: string;
   hidden: number;
   hidden_reason: string | null;

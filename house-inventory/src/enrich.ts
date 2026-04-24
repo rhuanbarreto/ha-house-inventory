@@ -20,7 +20,7 @@
 import type { Database } from "bun:sqlite";
 import type { HaClient } from "./ha-client.ts";
 import { generateStructured } from "./ai-task.ts";
-import { searchDuckDuckGo, type SearchResult } from "./search.ts";
+import { webSearch, type SearchResult, type SearchConfig } from "./search.ts";
 import { downloadPdf, NotAPdfError } from "./download.ts";
 import { getSetting } from "./settings.ts";
 import { getBrandSeed, isTrustedDomain } from "./brand-seeds.ts";
@@ -50,6 +50,7 @@ export async function enrichAsset(
   ha: HaClient,
   dataDir: string,
   assetId: string,
+  searchCfg?: SearchConfig,
 ): Promise<EnrichmentResult> {
   const asset = db
     .query<AssetRow, [string]>(
@@ -79,7 +80,7 @@ export async function enrichAsset(
     links = cached;
     cache = "hit";
   } else {
-    links = await researchAndAsk(ha, entityId, asset.manufacturer, asset.model);
+    links = await researchAndAsk(ha, entityId, asset.manufacturer, asset.model, searchCfg);
     putCache(db, cacheKey, asset.manufacturer, asset.model, links);
     cache = "miss";
   }
@@ -131,13 +132,15 @@ async function researchAndAsk(
   entityId: string,
   manufacturer: string,
   model: string,
+  searchCfg?: SearchConfig,
 ): Promise<EnrichedLinks> {
+  const cfg: SearchConfig = searchCfg ?? { provider: "duckduckgo" };
   const queries = [
     `${manufacturer} ${model} manual support`,
     `${manufacturer} ${model} manual filetype:pdf`,
   ];
   const ddgResults = await Promise.all(
-    queries.map((q) => searchDuckDuckGo(q, 8)),
+    queries.map((q) => webSearch(q, 8, cfg)),
   );
   const merged = dedupeByUrl(ddgResults.flat()).slice(0, 16);
 

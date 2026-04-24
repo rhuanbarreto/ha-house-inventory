@@ -130,7 +130,7 @@ export function AssetListPage() {
                     {r.model ?? "—"}
                   </td>
                   <td className={r.area_id ? "" : "muted"}>
-                    {r.area_id ?? "—"}
+                    {r.area_name ?? r.area_id ?? "—"}
                   </td>
                   <td>
                     <Tag variant={r.source === "manual" ? "accent" : "default"}>

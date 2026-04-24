@@ -70,5 +70,15 @@ ENV NODE_ENV=production \
     PORT=8099 \
     STATIC_DIR=/usr/local/share/house-inventory/static
 
+LABEL \
+  io.hass.name="House Inventory" \
+  io.hass.description="Track house assets with auto-enriched manuals." \
+  io.hass.type="addon" \
+  io.hass.arch="aarch64|amd64" \
+  org.opencontainers.image.title="House Inventory" \
+  org.opencontainers.image.description="Track house assets with auto-enriched manuals." \
+  org.opencontainers.image.source="https://github.com/rhuanbarreto/ha-house-inventory" \
+  org.opencontainers.image.licenses="MIT"
+
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD wget -qO- http://127.0.0.1:8099/healthz || exit 1

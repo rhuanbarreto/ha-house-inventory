@@ -18,6 +18,7 @@ import { clearSetting, getSetting, setSetting } from "./settings.ts";
 import { enrichAsset } from "./enrich.ts";
 import { queueStatus, runBatch } from "./enrich-batch.ts";
 import { getInFlightBatch, setInFlightBatch } from "./batch-state.ts";
+import type { SearchConfig } from "./search.ts";
 import { randomUUID } from "node:crypto";
 import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -31,6 +32,14 @@ const ENRICH_BATCH_PER_TICK = 3;
 const config = loadConfig();
 const ha = new HaClient(config);
 const db = openDatabase(config.dataDir);
+
+/** Build the search config from add-on options, used by all enrich calls. */
+function searchConfig(): SearchConfig {
+  return {
+    provider: config.webSearchProvider,
+    braveApiKey: config.braveApiKey,
+  };
+}
 
 /** Directory containing the built SPA (index.html, JS, CSS). */
 const STATIC_DIR = process.env.STATIC_DIR ?? join(import.meta.dir, "..", "dist", "static");
@@ -52,6 +61,11 @@ api.get("/config", (c) => {
   return c.json({
     ingressPath: c.req.header("x-ingress-path") ?? "",
     mode: config.mode,
+    user: {
+      id: c.req.header("x-remote-user-id") ?? null,
+      name: c.req.header("x-remote-user-name") ?? null,
+      displayName: c.req.header("x-remote-user-display-name") ?? null,
+    },
   });
 });
 
@@ -177,27 +191,29 @@ api.get("/areas", (c) => {
 
 api.get("/assets", (c) => {
   const showHidden = c.req.query("hidden") === "1";
-  const where: string[] = [`hidden = ${showHidden ? 1 : 0}`];
+  const where: string[] = [`a.hidden = ${showHidden ? 1 : 0}`];
   const params: (string | number)[] = [];
   const area = c.req.query("area");
   if (area) {
-    where.push("area_id = ?");
+    where.push("a.area_id = ?");
     params.push(area);
   }
   const q = c.req.query("q");
   if (q && q.trim().length > 0) {
     const term = `%${q.trim()}%`;
     where.push(
-      "(name LIKE ? OR COALESCE(manufacturer,'') LIKE ? OR COALESCE(model,'') LIKE ?)",
+      "(a.name LIKE ? OR COALESCE(a.manufacturer,'') LIKE ? OR COALESCE(a.model,'') LIKE ?)",
     );
     params.push(term, term, term);
   }
   const rows = db
     .query(
-      `SELECT id, name, manufacturer, model, area_id, source, hidden, hidden_reason
-       FROM assets
+      `SELECT a.id, a.name, a.manufacturer, a.model, a.area_id,
+              ar.name AS area_name, a.source, a.hidden, a.hidden_reason
+       FROM assets a
+       LEFT JOIN areas ar ON ar.id = a.area_id
        WHERE ${where.join(" AND ")}
-       ORDER BY COALESCE(manufacturer,''), COALESCE(model,''), name`,
+       ORDER BY COALESCE(a.manufacturer,''), COALESCE(a.model,''), a.name`,
     )
     .all(...params);
   return c.json({ count: rows.length, assets: rows });
@@ -532,7 +548,7 @@ api.post("/enrich/batch", async (c) => {
   console.log(`[batch] kicked off n=${max}`);
 
   // Fire-and-forget — the HTTP handler returns immediately.
-  void runBatch(db, ha, config.dataDir, { max })
+  void runBatch(db, ha, config.dataDir, { max, searchConfig: searchConfig() })
     .then((r) => {
       // eslint-disable-next-line no-console
       console.log(
@@ -558,7 +574,7 @@ api.get("/enrich/inflight", (c) => {
 api.post("/enrich/:assetId", async (c) => {
   const assetId = c.req.param("assetId");
   try {
-    const result = await enrichAsset(db, ha, config.dataDir, assetId);
+    const result = await enrichAsset(db, ha, config.dataDir, assetId, searchConfig());
     return c.json(result);
   } catch (err) {
     return c.json({ error: (err as Error).message }, 500);
@@ -669,6 +685,7 @@ async function runEnrichmentTick(): Promise<void> {
   try {
     const r = await runBatch(db, ha, config.dataDir, {
       max: ENRICH_BATCH_PER_TICK,
+      searchConfig: searchConfig(),
     });
     if (r.skippedNoLlm) {
       // eslint-disable-next-line no-console
