@@ -251,7 +251,8 @@ export function renderAssetDetail(
         </div>
       </div>
       <div class="row-actions">
-        <form method="post" action="./api/enrich/${escapeHtml(asset.id)}" hx-post="./api/enrich/${escapeHtml(asset.id)}" hx-swap="none" style="margin:0">
+        <form method="post" action="./api/enrich/${escapeHtml(asset.id)}" style="margin:0"
+              onsubmit="const b=this.querySelector('button');b.disabled=true;b.textContent='Enriching…';">
           <button class="btn primary" type="submit" ${!asset.manufacturer || !asset.model ? "disabled title='No manufacturer/model to enrich'" : ""}>
             ⚡ Enrich
           </button>
