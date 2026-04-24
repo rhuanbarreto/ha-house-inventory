@@ -7,6 +7,7 @@ import type { Database } from "bun:sqlite";
 import type { Config } from "../config.ts";
 import { getSetting } from "../settings.ts";
 import { queueStatus } from "../enrich-batch.ts";
+import { getInFlightBatch } from "../batch-state.ts";
 import { escapeHtml, rel, renderFlash, renderPage } from "./layout.ts";
 
 export function renderDashboard(
@@ -142,6 +143,7 @@ export function renderDashboard(
  */
 function renderEnrichmentCard(db: Database, hasLlm: boolean): string {
   const status = queueStatus(db);
+  const inFlight = getInFlightBatch();
   const enriched = db
     .query<{ c: number }, []>(
       `SELECT COUNT(DISTINCT asset_id) AS c FROM asset_links`,
@@ -150,10 +152,33 @@ function renderEnrichmentCard(db: Database, hasLlm: boolean): string {
   const pending = status.total_eligible;
   const total = pending + enriched;
   const pct = total === 0 ? 0 : Math.round((enriched / total) * 100);
+  const buttonsDisabled = !hasLlm || pending === 0 || inFlight !== null;
+
+  // When a batch is running, auto-refresh so the user sees progress
+  // without having to hit refresh themselves. ~8s balances "feels live"
+  // vs "don't hammer the server".
+  const autoRefresh = inFlight
+    ? '<meta http-equiv="refresh" content="8">'
+    : "";
 
   return /* html */ `
+    ${autoRefresh}
     <h2>Enrichment progress</h2>
     <div class="card">
+      ${
+        inFlight
+          ? /* html */ `
+        <div class="flash info" style="margin-bottom:12px;display:flex;align-items:center;gap:10px">
+          <span class="spinner" aria-hidden="true"
+                style="display:inline-block;width:14px;height:14px;border-radius:50%;
+                       border:2px solid var(--accent-soft);border-top-color:var(--accent);
+                       animation:spin 0.8s linear infinite"></span>
+          Running a batch of ${inFlight.max} · started ${escapeHtml(rel(inFlight.startedAt))}.
+          Page auto-refreshes every few seconds.
+        </div>
+        <style>@keyframes spin{to{transform:rotate(360deg)}}</style>`
+          : ""
+      }
       <div style="display:flex;align-items:center;gap:12px;justify-content:space-between;flex-wrap:wrap">
         <div>
           <div style="font-size:22px;font-weight:600;letter-spacing:-0.02em">
@@ -171,11 +196,13 @@ function renderEnrichmentCard(db: Database, hasLlm: boolean): string {
           }
         </div>
         <div style="display:flex;gap:8px;align-items:center">
-          <form method="post" action="./api/enrich/batch?n=3" style="margin:0">
-            <button class="btn" type="submit" ${!hasLlm || pending === 0 ? "disabled" : ""}>Enrich 3</button>
+          <form method="post" action="./api/enrich/batch?n=3" style="margin:0"
+                onsubmit="const b=this.querySelector('button');b.disabled=true;b.textContent='Starting…';">
+            <button class="btn" type="submit" ${buttonsDisabled ? "disabled" : ""}>Enrich 3</button>
           </form>
-          <form method="post" action="./api/enrich/batch?n=10" style="margin:0">
-            <button class="btn primary" type="submit" ${!hasLlm || pending === 0 ? "disabled" : ""}>Enrich 10</button>
+          <form method="post" action="./api/enrich/batch?n=10" style="margin:0"
+                onsubmit="const b=this.querySelector('button');b.disabled=true;b.textContent='Starting…';">
+            <button class="btn primary" type="submit" ${buttonsDisabled ? "disabled" : ""}>Enrich 10</button>
           </form>
         </div>
       </div>
