@@ -9,13 +9,15 @@
  * complexity without meaningful benefit for a local-network add-on.
  */
 
-import {
-  createRootRoute,
-  createRoute,
-  createRouter,
-} from "@tanstack/react-router";
+import { createRootRoute, createRoute, createRouter } from "@tanstack/react-router";
+// createRootRoute is used below for rootDef
 import { queryClient } from "./query.ts";
 import { getBaseUrl } from "./api.ts";
+
+// Routes are eagerly imported (not lazy/code-split). For 6 small pages
+// on a local-network add-on, the overhead of code-splitting infrastructure
+// exceeds the bundle size savings.
+
 
 import { RootLayout } from "./routes/__root.tsx";
 import { DashboardPage } from "./routes/index.tsx";
@@ -42,8 +44,8 @@ const rootDef = createRootRoute({
 const indexRoute = createRoute({
   getParentRoute: () => rootDef,
   path: "/",
-  component: DashboardPage,
-  loader: () => queryClient.ensureQueryData(dashboardQuery),
+  component: AreasPage,
+  loader: () => queryClient.ensureQueryData(areasQuery),
 });
 
 const assetsIndexRoute = createRoute({
@@ -76,15 +78,14 @@ const assetDetailRoute = createRoute({
   getParentRoute: () => rootDef,
   path: "/assets/$id",
   component: AssetDetailPage,
-  loader: ({ params }) =>
-    queryClient.ensureQueryData(assetDetailQuery(params.id)),
+  loader: ({ params }) => queryClient.ensureQueryData(assetDetailQuery(params.id)),
 });
 
-const areasRoute = createRoute({
+const dashboardRoute = createRoute({
   getParentRoute: () => rootDef,
-  path: "/areas",
-  component: AreasPage,
-  loader: () => queryClient.ensureQueryData(areasQuery),
+  path: "/dashboard",
+  component: DashboardPage,
+  loader: () => queryClient.ensureQueryData(dashboardQuery),
 });
 
 const llmRoute = createRoute({
@@ -103,10 +104,10 @@ const llmRoute = createRoute({
 
 const routeTree = rootDef.addChildren([
   indexRoute,
+  dashboardRoute,
   assetsIndexRoute,
   assetsNewRoute,
   assetDetailRoute,
-  areasRoute,
   llmRoute,
 ]);
 

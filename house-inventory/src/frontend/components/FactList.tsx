@@ -6,7 +6,7 @@ export function FactList({ facts }: FactListProps) {
   return (
     <dl className="facts">
       {facts.map(({ label, value }) => (
-        <div key={label} style={{ display: "contents" }}>
+        <div key={label} className="fact-item">
           <dt>{label}</dt>
           <dd>{value ?? "—"}</dd>
         </div>

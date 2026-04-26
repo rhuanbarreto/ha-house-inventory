@@ -22,9 +22,7 @@ import type {
 // Read the ingress path synchronously from the meta tag the server injects.
 function readIngressPath(): string {
   if (typeof document === "undefined") return "";
-  const meta = document.querySelector<HTMLMetaElement>(
-    'meta[name="ingress-path"]',
-  );
+  const meta = document.querySelector<HTMLMetaElement>('meta[name="ingress-path"]');
   return meta?.content ?? "";
 }
 
@@ -120,20 +118,16 @@ export const api = {
   getAssets: (params?: { hidden?: string; area?: string; q?: string }) =>
     get<AssetListResponse>(`/assets${toQuery(params)}`),
   getAsset: (id: string) => get<AssetDetailResponse>(`/assets/${id}`),
-  createAsset: (data: CreateAssetPayload) =>
-    post<{ id: string; name: string }>("/assets", data),
+  createAsset: (data: CreateAssetPayload) => post<{ id: string; name: string }>("/assets", data),
   updateAsset: (id: string, data: UpdateAssetPayload) =>
     post<{ ok: true }>(`/assets/${id}/edit`, data),
-  toggleHidden: (id: string) =>
-    post<{ hidden: boolean }>(`/assets/${id}/toggle-hidden`),
+  toggleHidden: (id: string) => post<{ hidden: boolean }>(`/assets/${id}/toggle-hidden`),
   deleteAsset: (id: string) => post<{ ok: true }>(`/assets/${id}/delete`),
 
   // Sync
   sync: () => post<SyncResult>("/sync"),
   getSyncHistory: () =>
-    get<{ id: number; started_at: string; finished_at: string | null }[]>(
-      "/sync/history",
-    ),
+    get<{ id: number; started_at: string; finished_at: string | null }[]>("/sync/history"),
 
   // LLM
   getLlm: () => get<LlmDiscovery>("/llm"),
@@ -159,9 +153,7 @@ export const api = {
       last_success_at: string | null;
     }>("/enrich/status"),
   getInFlight: () =>
-    get<{ inFlight: { startedAt: string; max: number } | null }>(
-      "/enrich/inflight",
-    ),
+    get<{ inFlight: { startedAt: string; max: number } | null }>("/enrich/inflight"),
   enrichBatch: (n: number) =>
     post<{ ok: true; started: boolean; max: number }>("/enrich/batch", { n }),
   enrichAsset: (id: string) => post<EnrichResult>(`/enrich/${id}`),

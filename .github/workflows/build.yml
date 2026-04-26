@@ -8,9 +8,31 @@ on:
       - ".github/workflows/build.yml"
   workflow_dispatch:
 
-# Validates that the Dockerfile builds and types check on every PR.
+# Validates that the Dockerfile builds, code is formatted, linted,
+# type-checked, and the frontend bundles on every PR.
 # Pushing images to GHCR happens in release.yml (on merge to main).
 jobs:
+  verify:
+    name: format · lint · typecheck · build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: house-inventory
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile || bun install
+      - name: Format check
+        run: bun run fmt:check
+      - name: Lint
+        run: bun run lint
+      - name: Typecheck
+        run: bun run typecheck
+      - name: Build frontend
+        run: bun run build
+
   build:
     name: build ${{ matrix.arch }}
     runs-on: ubuntu-latest
@@ -50,20 +72,6 @@ jobs:
           tags: house-inventory:${{ matrix.arch }}-ci
           cache-from: type=gha,scope=${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
-
-  typecheck:
-    name: typecheck
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: house-inventory
-    steps:
-      - uses: actions/checkout@v5
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-      - run: bun install --frozen-lockfile || bun install
-      - run: bun run typecheck
 
   test:
     name: test

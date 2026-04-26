@@ -8,8 +8,7 @@ export function RootLayout() {
 
   const navLink = (to: string, label: string) => {
     // Check if current path matches this nav item
-    const isActive =
-      to === "/" ? pathname === "/" || pathname === "" : pathname.startsWith(to);
+    const isActive = to === "/" ? pathname === "/" || pathname === "" : pathname.startsWith(to);
     return (
       <Link to={to} className={isActive ? "active" : undefined}>
         {label}
@@ -23,9 +22,9 @@ export function RootLayout() {
         <header className="top">
           <div className="brand">House Inventory</div>
           <nav>
-            {navLink("/", "Dashboard")}
+            {navLink("/", "Areas")}
             {navLink("/assets", "Assets")}
-            {navLink("/areas", "Areas")}
+            {navLink("/dashboard", "Dashboard")}
             {navLink("/llm", "LLM")}
           </nav>
         </header>

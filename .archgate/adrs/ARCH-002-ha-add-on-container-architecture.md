@@ -114,6 +114,7 @@ The Dockerfile MUST include a `HEALTHCHECK` instruction targeting the `/healthz`
 - **DO** exclude transient SQLite files (`*.db-shm`, `*.db-wal`) from backups via `backup_exclude` in `config.yaml`.
 - **DO** include HA-required labels (`io.hass.name`, `io.hass.type`, `io.hass.arch`) in the Dockerfile.
 - **DO** use `ingress: true` in `config.yaml` to serve the UI inside HA's sidebar with built-in authentication.
+- **DO** use explicit `Bun.serve({ hostname: "0.0.0.0", port, fetch })` to start the HTTP server. The compiled binary MUST bind to all interfaces so that the Supervisor watchdog and Docker `HEALTHCHECK` can reach `/healthz` from outside the container.
 
 ### Don't
 
@@ -124,6 +125,7 @@ The Dockerfile MUST include a `HEALTHCHECK` instruction targeting the `/healthz`
 - **DON'T** omit `BUILD_FROM` from CI workflow `build-args`. The Dockerfile default (`amd64-base`) exists only for local `docker build` convenience — CI MUST always be explicit.
 - **DON'T** ship `node_modules`, source files, or build tools in the runtime stage. The multi-stage build MUST copy only the compiled binary and built static assets.
 - **DON'T** use a non-HA base image (e.g., `alpine:3.19`, `debian:bookworm`) for the runtime stage. The HA Supervisor expects its own base images for s6-overlay, `bashio`, and service lifecycle management.
+- **DON'T** use `export default { fetch, port }` (Bun's auto-serve pattern) in production. In `bun build --compile` binaries, the auto-serve pattern may bind to localhost, making the server unreachable from outside the container. This silently breaks the Supervisor watchdog, causing a restart loop where the addon starts successfully but gets killed ~30 seconds later.
 
 ## Consequences
 

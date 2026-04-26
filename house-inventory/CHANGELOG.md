@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.2.2] — 2025-04-25
+
+### Fixed
+
+- Addon restart loop: replaced `export default { fetch, port }` with
+  explicit `Bun.serve()` bound to `0.0.0.0`. The auto-serve pattern could
+  bind to localhost in compiled binaries, making the Supervisor watchdog
+  unable to reach `/healthz`, which triggered a restart every ~30 seconds.
+- Removed overly restrictive custom AppArmor profile that was blocking
+  s6-overlay shutdown (`exec /init: exec format error`, `/bin/sh: Permission
+  denied`). The addon now uses Docker's default AppArmor profile until a
+  properly tested custom profile is authored.
+
 ## [0.2.1] — 2025-04-25
 
 ### Fixed

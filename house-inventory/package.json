@@ -1,6 +1,6 @@
 {
   "name": "house-inventory",
-  "version": "0.2.0",
+  "version": "0.2.2",
   "description": "House asset inventory — Home Assistant add-on",
   "private": true,
   "type": "module",
@@ -10,7 +10,10 @@
     "build:backend": "bun build ./src/index.ts --target=bun --outdir=./dist --minify",
     "start": "bun dist/index.js",
     "test": "bun test src/__tests__/",
-    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.frontend.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.frontend.json",
+    "lint": "oxlint src/frontend/",
+    "fmt": "oxfmt --write src/",
+    "fmt:check": "oxfmt src/"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.75.5",
@@ -24,6 +27,8 @@
     "@types/bun": "latest",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
+    "oxfmt": "^0.46.0",
+    "oxlint": "^1.61.0",
     "typescript": "^5.6.0"
   }
 }

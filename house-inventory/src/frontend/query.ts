@@ -56,11 +56,7 @@ export const dashboardQuery = queryOptions({
   queryFn: () => api.getDashboard(),
 });
 
-export const assetListQuery = (params?: {
-  hidden?: string;
-  area?: string;
-  q?: string;
-}) =>
+export const assetListQuery = (params?: { hidden?: string; area?: string; q?: string }) =>
   queryOptions({
     queryKey: keys.assets.list(params),
     queryFn: () => api.getAssets(params),

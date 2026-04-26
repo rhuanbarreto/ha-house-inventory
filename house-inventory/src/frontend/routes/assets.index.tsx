@@ -28,9 +28,7 @@ export function AssetListPage() {
   const { data: areaData } = useQuery({
     queryKey: ["areas-for-filter"],
     queryFn: async () => {
-      const res = await fetch(
-        `${(await import("../api.ts")).getBaseUrl()}/api/areas`,
-      );
+      const res = await fetch(`${(await import("../api.ts")).getBaseUrl()}/api/areas`);
       if (!res.ok) return { areas: [] };
       const json = await res.json();
       return json as { areas: Array<{ id: string; name: string }> };
@@ -66,11 +64,7 @@ export function AssetListPage() {
           value={localQ}
           onChange={(e) => setLocalQ(e.target.value)}
         />
-        <select
-          name="area"
-          value={localArea}
-          onChange={(e) => setLocalArea(e.target.value)}
-        >
+        <select name="area" value={localArea} onChange={(e) => setLocalArea(e.target.value)}>
           <option value="">All areas</option>
           {areas.map((a) => (
             <option key={a.id} value={a.id}>
@@ -78,11 +72,7 @@ export function AssetListPage() {
             </option>
           ))}
         </select>
-        <select
-          name="hidden"
-          value={localHidden}
-          onChange={(e) => setLocalHidden(e.target.value)}
-        >
+        <select name="hidden" value={localHidden} onChange={(e) => setLocalHidden(e.target.value)}>
           <option value="0">Visible</option>
           <option value="1">Hidden</option>
         </select>
@@ -120,29 +110,16 @@ export function AssetListPage() {
                       {r.name}
                     </Link>
                   </td>
-                  <td className={r.manufacturer ? "" : "muted"}>
-                    {r.manufacturer ?? "—"}
-                  </td>
-                  <td
-                    className={r.model ? "mono" : "muted"}
-                    style={{ fontSize: "12.5px" }}
-                  >
-                    {r.model ?? "—"}
-                  </td>
-                  <td className={r.area_id ? "" : "muted"}>
-                    {r.area_name ?? r.area_id ?? "—"}
-                  </td>
+                  <td className={r.manufacturer ? "" : "muted"}>{r.manufacturer ?? "—"}</td>
+                  <td className={r.model ? "mono text-sm" : "muted text-sm"}>{r.model ?? "—"}</td>
+                  <td className={r.area_id ? "" : "muted"}>{r.area_name ?? r.area_id ?? "—"}</td>
                   <td>
                     <Tag variant={r.source === "manual" ? "accent" : "default"}>
                       {r.source === "manual" ? "manual" : "home_assistant"}
                     </Tag>
                   </td>
                   <td>
-                    <Link
-                      to="/assets/$id"
-                      params={{ id: r.id }}
-                      className="btn"
-                    >
+                    <Link to="/assets/$id" params={{ id: r.id }} className="btn">
                       Open →
                     </Link>
                   </td>

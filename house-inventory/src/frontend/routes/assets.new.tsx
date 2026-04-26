@@ -57,25 +57,14 @@ export function AssetNewPage() {
 
   return (
     <>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "baseline",
-          gap: 12,
-          marginBottom: 8,
-        }}
-      >
-        <Link to="/assets" search={{ q: "", area: "", hidden: "0" }} style={{ color: "var(--text-dim)" }}>
+      <div className="breadcrumb-bar">
+        <Link to="/assets" search={{ q: "", area: "", hidden: "0" }} className="link-dim">
           ← Assets
         </Link>
       </div>
       <h1>Add manual asset</h1>
-      <p
-        className="muted"
-        style={{ color: "var(--text-dim)", marginTop: -8 }}
-      >
-        For things that aren't on Home Assistant — furniture, dumb appliances,
-        tools.
+      <p className="page-subtitle">
+        For things that aren't on Home Assistant — furniture, dumb appliances, tools.
       </p>
 
       <form
@@ -164,17 +153,10 @@ export function AssetNewPage() {
         </label>
         <label>
           <span>Notes</span>
-          <textarea
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-          />
+          <textarea value={notes} onChange={(e) => setNotes(e.target.value)} />
         </label>
         <div className="actions">
-          <button
-            className="btn primary"
-            type="submit"
-            disabled={mutation.isPending}
-          >
+          <button className="btn primary" type="submit" disabled={mutation.isPending}>
             {mutation.isPending ? "Creating…" : "Create"}
           </button>
           <Link to="/assets" search={{ q: "", area: "", hidden: "0" }} className="btn">

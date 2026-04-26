@@ -41,15 +41,9 @@ interface ExistingAssetRow {
   hidden_reason: string | null;
 }
 
-export async function syncFromHomeAssistant(
-  db: Database,
-  ha: HaClient,
-): Promise<SyncResult> {
+export async function syncFromHomeAssistant(db: Database, ha: HaClient): Promise<SyncResult> {
   const startedAt = new Date().toISOString();
-  const logRow = db.run(
-    "INSERT INTO ha_sync_log (started_at) VALUES (?)",
-    [startedAt],
-  );
+  const logRow = db.run("INSERT INTO ha_sync_log (started_at) VALUES (?)", [startedAt]);
   const logId = Number(logRow.lastInsertRowid);
 
   try {
@@ -78,10 +72,11 @@ export async function syncFromHomeAssistant(
   } catch (err) {
     const finishedAt = new Date().toISOString();
     const message = (err as Error).message;
-    db.run(
-      "UPDATE ha_sync_log SET finished_at=?, error=? WHERE id=?",
-      [finishedAt, message, logId],
-    );
+    db.run("UPDATE ha_sync_log SET finished_at=?, error=? WHERE id=?", [
+      finishedAt,
+      message,
+      logId,
+    ]);
     return {
       startedAt,
       finishedAt,
@@ -233,10 +228,7 @@ function upsertRegistry(
     if (devices.length > 0) {
       const seen = new Set(devices.map((d) => d.id));
       const orphans = db
-        .query<
-          { id: string; hidden: number; hidden_reason: string | null },
-          []
-        >(
+        .query<{ id: string; hidden: number; hidden_reason: string | null }, []>(
           `SELECT id, hidden, hidden_reason
            FROM assets
            WHERE source = 'home_assistant' AND ha_device_id IS NOT NULL`,

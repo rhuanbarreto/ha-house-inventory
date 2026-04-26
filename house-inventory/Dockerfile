@@ -22,6 +22,7 @@ COPY package.json bun.lock* ./
 RUN bun install --frozen-lockfile || bun install
 
 COPY tsconfig.json tsconfig.frontend.json ./
+COPY icon.png ./
 COPY scripts ./scripts
 COPY src ./src
 
