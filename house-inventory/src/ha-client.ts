@@ -87,10 +87,7 @@ export interface HaConfigEntry {
   domain: string;
   title: string;
   state: string;
-  supported_subentry_types: Record<
-    string,
-    { supports_reconfigure?: boolean } | undefined
-  >;
+  supported_subentry_types: Record<string, { supports_reconfigure?: boolean } | undefined>;
   num_subentries: number;
 }
 
@@ -168,23 +165,21 @@ export class HaClient {
           try {
             // Floors registry is newer — tolerate the command being
             // unavailable on older HA versions by catching its promise.
-            const [devicesRes, areasRes, entitiesRes, floorsRes] =
-              await Promise.all([
-                send({ type: "config/device_registry/list" }),
-                send({ type: "config/area_registry/list" }),
-                send({ type: "config/entity_registry/list" }),
-                send({ type: "config/floor_registry/list" }).catch(
-                  () =>
-                    ({
-                      type: "result",
-                      result: [] as HaFloor[],
-                    }) as unknown as WsMessage,
-                ),
-              ]);
+            const [devicesRes, areasRes, entitiesRes, floorsRes] = await Promise.all([
+              send({ type: "config/device_registry/list" }),
+              send({ type: "config/area_registry/list" }),
+              send({ type: "config/entity_registry/list" }),
+              send({ type: "config/floor_registry/list" }).catch(
+                () =>
+                  ({
+                    type: "result",
+                    result: [] as HaFloor[],
+                  }) as unknown as WsMessage,
+              ),
+            ]);
             const devices = (devicesRes as { result?: HaDevice[] }).result ?? [];
             const areas = (areasRes as { result?: HaArea[] }).result ?? [];
-            const entities =
-              (entitiesRes as { result?: HaEntity[] }).result ?? [];
+            const entities = (entitiesRes as { result?: HaEntity[] }).result ?? [];
             const floors = (floorsRes as { result?: HaFloor[] }).result ?? [];
             resolve({
               devices,
@@ -228,15 +223,12 @@ export class HaClient {
       headers: { Authorization: `Bearer ${this.config.haToken}` },
     });
     if (!res.ok) {
-      throw new Error(
-        `HA /api/states failed: ${res.status} ${res.statusText}`,
-      );
+      throw new Error(`HA /api/states failed: ${res.status} ${res.statusText}`);
     }
     const states = (await res.json()) as HaStateRow[];
     const result: LlmEntity[] = [];
     for (const s of states) {
-      const friendly =
-        (s.attributes?.["friendly_name"] as string | undefined) ?? null;
+      const friendly = (s.attributes?.["friendly_name"] as string | undefined) ?? null;
       if (s.entity_id.startsWith("ai_task.")) {
         result.push({
           entity_id: s.entity_id,
@@ -261,14 +253,11 @@ export class HaClient {
 
   /** List all config entries — used to find LLM integrations we can extend. */
   async listConfigEntries(): Promise<HaConfigEntry[]> {
-    const res = await fetch(
-      `${this.config.haBaseUrl}/api/config/config_entries/entry`,
-      { headers: { Authorization: `Bearer ${this.config.haToken}` } },
-    );
+    const res = await fetch(`${this.config.haBaseUrl}/api/config/config_entries/entry`, {
+      headers: { Authorization: `Bearer ${this.config.haToken}` },
+    });
     if (!res.ok) {
-      throw new Error(
-        `HA /api/config/config_entries/entry failed: ${res.status}`,
-      );
+      throw new Error(`HA /api/config/config_entries/entry failed: ${res.status}`);
     }
     return (await res.json()) as HaConfigEntry[];
   }
@@ -292,34 +281,23 @@ export class HaClient {
   }
 
   /** Start a subentry config-flow. Returns the first step (usually a form). */
-  async startSubentryFlow(
-    entryId: string,
-    subentryType: string,
-  ): Promise<HaFlowStep> {
-    const res = await fetch(
-      `${this.config.haBaseUrl}/api/config/config_entries/subentries/flow`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${this.config.haToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ handler: [entryId, subentryType] }),
+  async startSubentryFlow(entryId: string, subentryType: string): Promise<HaFlowStep> {
+    const res = await fetch(`${this.config.haBaseUrl}/api/config/config_entries/subentries/flow`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${this.config.haToken}`,
+        "Content-Type": "application/json",
       },
-    );
+      body: JSON.stringify({ handler: [entryId, subentryType] }),
+    });
     if (!res.ok) {
-      throw new Error(
-        `Start subentry flow failed: ${res.status} ${await res.text()}`,
-      );
+      throw new Error(`Start subentry flow failed: ${res.status} ${await res.text()}`);
     }
     return (await res.json()) as HaFlowStep;
   }
 
   /** Submit form data to an in-flight subentry config-flow step. */
-  async submitSubentryFlow(
-    flowId: string,
-    data: Record<string, unknown>,
-  ): Promise<HaFlowStep> {
+  async submitSubentryFlow(flowId: string, data: Record<string, unknown>): Promise<HaFlowStep> {
     const res = await fetch(
       `${this.config.haBaseUrl}/api/config/config_entries/subentries/flow/${flowId}`,
       {
@@ -332,22 +310,17 @@ export class HaClient {
       },
     );
     if (!res.ok) {
-      throw new Error(
-        `Submit subentry flow failed: ${res.status} ${await res.text()}`,
-      );
+      throw new Error(`Submit subentry flow failed: ${res.status} ${await res.text()}`);
     }
     return (await res.json()) as HaFlowStep;
   }
 
   /** Cancel an in-flight subentry flow (best-effort cleanup on error paths). */
   async cancelSubentryFlow(flowId: string): Promise<void> {
-    await fetch(
-      `${this.config.haBaseUrl}/api/config/config_entries/subentries/flow/${flowId}`,
-      {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${this.config.haToken}` },
-      },
-    ).catch(() => undefined);
+    await fetch(`${this.config.haBaseUrl}/api/config/config_entries/subentries/flow/${flowId}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${this.config.haToken}` },
+    }).catch(() => undefined);
   }
 
   /**

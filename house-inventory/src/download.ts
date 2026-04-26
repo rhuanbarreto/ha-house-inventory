@@ -75,9 +75,7 @@ export async function downloadPdf(
   const bytes = await res.arrayBuffer();
 
   if (bytes.byteLength > max) {
-    throw new Error(
-      `PDF too large: ${bytes.byteLength} bytes exceeds cap of ${max}`,
-    );
+    throw new Error(`PDF too large: ${bytes.byteLength} bytes exceeds cap of ${max}`);
   }
 
   // Magic-byte sniff is the authority — Content-Type is just a hint. Some
@@ -85,7 +83,9 @@ export async function downloadPdf(
   const buf = new Uint8Array(bytes);
   if (!startsWithPdfMagic(buf)) {
     throw new NotAPdfError(
-      `Response is not a PDF (first bytes: ${Array.from(buf.slice(0, 4)).map((b) => b.toString(16)).join(" ")})`,
+      `Response is not a PDF (first bytes: ${Array.from(buf.slice(0, 4))
+        .map((b) => b.toString(16))
+        .join(" ")})`,
       url,
       contentType,
     );

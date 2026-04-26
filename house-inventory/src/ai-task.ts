@@ -58,16 +58,11 @@ export async function generateStructured<T extends Record<string, unknown>>(
       ),
     };
     const raw = await callWithRetry(
-      () =>
-        ha.callService("ai_task", "generate_data", payload, true) as Promise<
-          AiTaskResponse<T>
-        >,
+      () => ha.callService("ai_task", "generate_data", payload, true) as Promise<AiTaskResponse<T>>,
     );
     const data = raw?.service_response?.data;
     if (!data) {
-      throw new Error(
-        `ai_task.generate_data returned no data: ${JSON.stringify(raw)}`,
-      );
+      throw new Error(`ai_task.generate_data returned no data: ${JSON.stringify(raw)}`);
     }
     return data;
   }
@@ -95,10 +90,7 @@ export async function generateStructured<T extends Record<string, unknown>>(
  * single retry turns ~15% of our observed failures into successes without
  * any meaningful cost to cadence.
  */
-async function callWithRetry<T>(
-  fn: () => Promise<T>,
-  delayMs = 1500,
-): Promise<T> {
+async function callWithRetry<T>(fn: () => Promise<T>, delayMs = 1500): Promise<T> {
   try {
     return await fn();
   } catch (err) {
@@ -121,10 +113,7 @@ function entityKind(entityId: string): "ai_task" | "conversation" {
 
 function buildConversationPrompt<T>(opts: GenerateOptions<T>): string {
   const fields = Object.entries(opts.structure)
-    .map(
-      ([name, def]) =>
-        `  - ${name}${def.required ? " (required)" : ""}: ${def.description}`,
-    )
+    .map(([name, def]) => `  - ${name}${def.required ? " (required)" : ""}: ${def.description}`)
     .join("\n");
   return `${opts.instructions}
 

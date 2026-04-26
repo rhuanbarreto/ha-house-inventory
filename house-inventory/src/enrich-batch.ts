@@ -104,10 +104,7 @@ export function pickNext(db: Database, limit: number): Array<{ id: string; name:
   const staleCutoff = new Date(Date.now() - STALE_MS).toISOString();
   const backoffCutoff = new Date(Date.now() - BACKOFF_MS).toISOString();
   return db
-    .query<
-      { id: string; name: string },
-      [string, string, string, number]
-    >(
+    .query<{ id: string; name: string }, [string, string, string, number]>(
       `SELECT id, name FROM assets
        WHERE hidden = 0
          AND manufacturer IS NOT NULL AND manufacturer != ''

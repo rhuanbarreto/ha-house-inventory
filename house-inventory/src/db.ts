@@ -189,9 +189,7 @@ function runMigrations(db: Database): void {
   const appliedVersions = new Set<number>();
   if (hasMigrationsTable) {
     const rows = db
-      .query<{ version: number }, []>(
-        "SELECT version FROM schema_migrations ORDER BY version",
-      )
+      .query<{ version: number }, []>("SELECT version FROM schema_migrations ORDER BY version")
       .all();
     for (const r of rows) appliedVersions.add(r.version);
   }
@@ -200,10 +198,11 @@ function runMigrations(db: Database): void {
     if (appliedVersions.has(m.version)) continue;
     db.transaction(() => {
       db.exec(m.sql);
-      db.run(
-        "INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)",
-        [m.version, m.name, new Date().toISOString()],
-      );
+      db.run("INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)", [
+        m.version,
+        m.name,
+        new Date().toISOString(),
+      ]);
     })();
     // eslint-disable-next-line no-console
     console.log(`[db] applied migration ${m.version} ${m.name}`);

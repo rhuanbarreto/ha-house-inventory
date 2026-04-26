@@ -114,16 +114,20 @@ api.get("/dashboard", (c) => {
 
   const llmEntityId = getSetting(db, "llm_entity_id");
   const enrichStatus = queueStatus(db);
-  const enriched = db
-    .query<{ c: number }, []>(
-      `SELECT COUNT(DISTINCT asset_id) AS c FROM asset_links`,
-    )
-    .get()?.c ?? 0;
+  const enriched =
+    db.query<{ c: number }, []>(`SELECT COUNT(DISTINCT asset_id) AS c FROM asset_links`).get()?.c ??
+    0;
   const inFlight = getInFlightBatch();
 
   return c.json({
     totals: totals ?? {
-      total: 0, visible: 0, hidden: 0, manual: 0, with_links: 0, with_pdf: 0, areas: 0,
+      total: 0,
+      visible: 0,
+      hidden: 0,
+      manual: 0,
+      with_links: 0,
+      with_pdf: 0,
+      areas: 0,
     },
     lastSync: lastSync ?? null,
     llmEntityId,
@@ -139,10 +143,7 @@ api.get("/dashboard", (c) => {
 
 api.get("/areas", (c) => {
   const floors = db
-    .query<
-      { id: string; name: string; icon: string | null; level: number | null },
-      []
-    >(
+    .query<{ id: string; name: string; icon: string | null; level: number | null }, []>(
       `SELECT id, name, icon, level FROM floors
        ORDER BY COALESCE(level, 0), name`,
     )
@@ -178,11 +179,12 @@ api.get("/areas", (c) => {
     )
     .all();
 
-  const unassignedAssets = db
-    .query<{ c: number }, []>(
-      "SELECT COUNT(*) AS c FROM assets WHERE area_id IS NULL AND hidden = 0",
-    )
-    .get()?.c ?? 0;
+  const unassignedAssets =
+    db
+      .query<{ c: number }, []>(
+        "SELECT COUNT(*) AS c FROM assets WHERE area_id IS NULL AND hidden = 0",
+      )
+      .get()?.c ?? 0;
 
   return c.json({ floors, areas, unassignedAssets });
 });
@@ -221,9 +223,7 @@ api.get("/assets", (c) => {
 
 api.get("/assets/:id", (c) => {
   const assetId = c.req.param("id");
-  const asset = db
-    .query("SELECT * FROM assets WHERE id = ?")
-    .get(assetId);
+  const asset = db.query("SELECT * FROM assets WHERE id = ?").get(assetId);
   if (!asset) return c.json({ error: "not found" }, 404);
   const links = db
     .query(
@@ -277,8 +277,19 @@ api.post("/assets", async (c) => {
        hidden, hidden_reason, created_at, updated_at, last_seen_at
      ) VALUES (?, 'manual', NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, ?)`,
     [
-      id, name, manufacturer, model, areaId, category,
-      purchaseDate, priceCents, warrantyUntil, notes, now, now, now,
+      id,
+      name,
+      manufacturer,
+      model,
+      areaId,
+      category,
+      purchaseDate,
+      priceCents,
+      warrantyUntil,
+      notes,
+      now,
+      now,
+      now,
     ],
   );
 
@@ -313,8 +324,16 @@ api.post("/assets/:id/edit", async (c) => {
        category=?, area_id=?, purchase_date=?, purchase_price_cents=?,
        warranty_until=?, notes=?, updated_at=?
      WHERE id=?`,
-    [category, areaId, purchaseDate, priceCents, warrantyUntil, notes,
-      new Date().toISOString(), assetId],
+    [
+      category,
+      areaId,
+      purchaseDate,
+      priceCents,
+      warrantyUntil,
+      notes,
+      new Date().toISOString(),
+      assetId,
+    ],
   );
   return c.json({ ok: true });
 });
@@ -322,16 +341,16 @@ api.post("/assets/:id/edit", async (c) => {
 api.post("/assets/:id/toggle-hidden", (c) => {
   const assetId = c.req.param("id");
   const row = db
-    .query<{ hidden: number }, [string]>(
-      "SELECT hidden FROM assets WHERE id = ?",
-    )
+    .query<{ hidden: number }, [string]>("SELECT hidden FROM assets WHERE id = ?")
     .get(assetId);
   if (!row) return c.json({ error: "not found" }, 404);
   const next = row.hidden ? 0 : 1;
-  db.run(
-    `UPDATE assets SET hidden=?, hidden_reason=?, updated_at=? WHERE id=?`,
-    [next, next === 1 ? "manual_hide" : null, new Date().toISOString(), assetId],
-  );
+  db.run(`UPDATE assets SET hidden=?, hidden_reason=?, updated_at=? WHERE id=?`, [
+    next,
+    next === 1 ? "manual_hide" : null,
+    new Date().toISOString(),
+    assetId,
+  ]);
   return c.json({ hidden: next === 1 });
 });
 
@@ -358,9 +377,7 @@ api.post("/sync", async (c) => {
 });
 
 api.get("/sync/history", (c) => {
-  const rows = db
-    .query("SELECT * FROM ha_sync_log ORDER BY id DESC LIMIT 20")
-    .all();
+  const rows = db.query("SELECT * FROM ha_sync_log ORDER BY id DESC LIMIT 20").all();
   return c.json(rows);
 });
 
@@ -379,9 +396,7 @@ api.get("/llm", async (c) => {
         conversation_agents: discovered.length - aiTasks.length,
       },
       autoSelectable:
-        current === null && aiTasks.length === 1
-          ? (aiTasks[0]?.entity_id ?? null)
-          : null,
+        current === null && aiTasks.length === 1 ? (aiTasks[0]?.entity_id ?? null) : null,
     });
   } catch (err) {
     return c.json({ error: (err as Error).message }, 500);
@@ -465,9 +480,7 @@ api.post("/llm/create", async (c) => {
   }
 
   const entitiesBefore = new Set(
-    (await ha.discoverLlmEntities())
-      .filter((e) => e.kind === "ai_task")
-      .map((e) => e.entity_id),
+    (await ha.discoverLlmEntities()).filter((e) => e.kind === "ai_task").map((e) => e.entity_id),
   );
 
   let step = await ha.startSubentryFlow(entryId, "ai_task_data");
@@ -485,9 +498,7 @@ api.post("/llm/create", async (c) => {
   let newEntityId: string | null = null;
   for (let i = 0; i < 10; i++) {
     const after = await ha.discoverLlmEntities();
-    const nw = after.find(
-      (e) => e.kind === "ai_task" && !entitiesBefore.has(e.entity_id),
-    );
+    const nw = after.find((e) => e.kind === "ai_task" && !entitiesBefore.has(e.entity_id));
     if (nw) {
       newEntityId = nw.entity_id;
       break;
@@ -500,7 +511,11 @@ api.post("/llm/create", async (c) => {
     return c.json({ ok: true, entity_id: newEntityId, auto_selected: true });
   }
 
-  return c.json({ ok: true, entity_id: null, note: "Subentry created but entity didn't surface — refresh in a moment." });
+  return c.json({
+    ok: true,
+    entity_id: null,
+    note: "Subentry created but entity didn't surface — refresh in a moment.",
+  });
 });
 
 api.get("/llm/create/schema", async (c) => {
@@ -533,10 +548,13 @@ api.post("/enrich/batch", async (c) => {
 
   const existing = getInFlightBatch();
   if (existing) {
-    return c.json({
-      error: `A batch of ${existing.max} is already running (started ${existing.startedAt}).`,
-      inFlight: existing,
-    }, 409);
+    return c.json(
+      {
+        error: `A batch of ${existing.max} is already running (started ${existing.startedAt}).`,
+        inFlight: existing,
+      },
+      409,
+    );
   }
 
   if (!getSetting(db, "llm_entity_id")) {

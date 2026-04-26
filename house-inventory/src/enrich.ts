@@ -53,15 +53,11 @@ export async function enrichAsset(
   searchCfg?: SearchConfig,
 ): Promise<EnrichmentResult> {
   const asset = db
-    .query<AssetRow, [string]>(
-      "SELECT id, name, manufacturer, model FROM assets WHERE id = ?",
-    )
+    .query<AssetRow, [string]>("SELECT id, name, manufacturer, model FROM assets WHERE id = ?")
     .get(assetId);
   if (!asset) throw new Error(`asset not found: ${assetId}`);
   if (!asset.manufacturer || !asset.model) {
-    throw new Error(
-      `asset ${assetId} has no manufacturer/model — cannot enrich automatically`,
-    );
+    throw new Error(`asset ${assetId} has no manufacturer/model — cannot enrich automatically`);
   }
 
   const entityId = getSetting(db, "llm_entity_id");
@@ -96,9 +92,7 @@ export async function enrichAsset(
       manualDownloaded = true;
     } catch (err) {
       manualError =
-        err instanceof NotAPdfError
-          ? `not a pdf (${err.contentType})`
-          : (err as Error).message;
+        err instanceof NotAPdfError ? `not a pdf (${err.contentType})` : (err as Error).message;
     }
   }
 
@@ -139,9 +133,7 @@ async function researchAndAsk(
     `${manufacturer} ${model} manual support`,
     `${manufacturer} ${model} manual filetype:pdf`,
   ];
-  const ddgResults = await Promise.all(
-    queries.map((q) => webSearch(q, 8, cfg)),
-  );
+  const ddgResults = await Promise.all(queries.map((q) => webSearch(q, 8, cfg)));
   const merged = dedupeByUrl(ddgResults.flat()).slice(0, 16);
 
   // Prepend brand-portal URLs so the LLM can cite them even when DDG
@@ -181,9 +173,7 @@ async function researchAndAsk(
   const allCandidates = dedupeByUrl([...seedCandidates, ...merged]);
 
   const searchBlob = allCandidates
-    .map(
-      (r, i) => `[${i + 1}] ${r.title}\n    ${r.url}\n    ${r.snippet}`,
-    )
+    .map((r, i) => `[${i + 1}] ${r.title}\n    ${r.url}\n    ${r.snippet}`)
     .join("\n\n");
 
   const instructions = `You are helping build a house asset inventory.
@@ -284,10 +274,9 @@ function cacheKeyFor(manufacturer: string, model: string): string {
 
 function getCached(db: Database, key: string): EnrichedLinks | null {
   const row = db
-    .query<
-      { data_json: string; expires_at: string | null },
-      [string]
-    >("SELECT data_json, expires_at FROM enrichment_cache WHERE key = ?")
+    .query<{ data_json: string; expires_at: string | null }, [string]>(
+      "SELECT data_json, expires_at FROM enrichment_cache WHERE key = ?",
+    )
     .get(key);
   if (!row) return null;
   if (row.expires_at && Date.parse(row.expires_at) < Date.now()) return null;
@@ -322,11 +311,7 @@ function putCache(
 
 // ---- persistence into asset_links / asset_files --------------------------
 
-function upsertLinks(
-  db: Database,
-  assetId: string,
-  links: EnrichedLinks,
-): void {
+function upsertLinks(db: Database, assetId: string, links: EnrichedLinks): void {
   const now = new Date().toISOString();
   const insert = db.prepare(
     `INSERT INTO asset_links (asset_id, kind, url, title, fetched_at)

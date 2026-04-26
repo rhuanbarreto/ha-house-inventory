@@ -2,11 +2,7 @@
  * Asset detail page — facts, edit form, links, files, action buttons.
  */
 
-import {
-  useQuery,
-  useMutation,
-  useQueryClient,
-} from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useState } from "react";
 import { assetDetailQuery, keys } from "../query.ts";
@@ -28,9 +24,6 @@ const KIND_LABELS: Record<string, string> = {
 
 export function AssetDetailPage() {
   const { id } = useParams({ from: "/assets/$id" });
-  const { flash } = useFlash();
-  const qc = useQueryClient();
-  const navigate = useNavigate();
   const { data, isLoading } = useQuery(assetDetailQuery(id));
 
   if (isLoading || !data) return <div className="card empty">Loading…</div>;
@@ -39,36 +32,22 @@ export function AssetDetailPage() {
 
   return (
     <>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 8 }}>
-        <Link to="/assets" search={{ q: "", area: "", hidden: "0" }} style={{ color: "var(--text-dim)" }}>
+      <div className="breadcrumb-bar">
+        <Link to="/assets" search={{ q: "", area: "", hidden: "0" }} className="link-dim">
           ← Assets
         </Link>
       </div>
 
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "flex-start",
-          gap: 16,
-          flexWrap: "wrap",
-        }}
-      >
+      <div className="detail-header">
         <div>
-          <h1 style={{ margin: 0 }}>{asset.name}</h1>
-          <div
-            className="muted"
-            style={{ color: "var(--text-dim)", marginTop: 4 }}
-          >
+          <h1 className="m-0">{asset.name}</h1>
+          <div className="muted caption">
             {asset.manufacturer ?? "unknown"} ·{" "}
             <span className="mono">{asset.model ?? "no model"}</span>
             {asset.hidden ? (
               <>
                 {" "}
-                ·{" "}
-                <Tag variant="warn">
-                  hidden ({asset.hidden_reason ?? "manual"})
-                </Tag>
+                · <Tag variant="warn">hidden ({asset.hidden_reason ?? "manual"})</Tag>
               </>
             ) : null}
           </div>
@@ -76,14 +55,7 @@ export function AssetDetailPage() {
         <ActionButtons asset={asset} />
       </div>
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 1fr",
-          gap: 16,
-          marginTop: 20,
-        }}
-      >
+      <div className="detail-columns">
         <section>
           <h2>Facts</h2>
           <div className="card">
@@ -92,11 +64,7 @@ export function AssetDetailPage() {
                 {
                   label: "Source",
                   value: (
-                    <Tag
-                      variant={
-                        asset.source === "manual" ? "accent" : "default"
-                      }
-                    >
+                    <Tag variant={asset.source === "manual" ? "accent" : "default"}>
                       {asset.source}
                     </Tag>
                   ),
@@ -105,14 +73,7 @@ export function AssetDetailPage() {
                   ? [
                       {
                         label: "HA device",
-                        value: (
-                          <span
-                            className="mono"
-                            style={{ fontSize: "12px" }}
-                          >
-                            {asset.ha_device_id}
-                          </span>
-                        ),
+                        value: <span className="mono-sm">{asset.ha_device_id}</span>,
                       },
                     ]
                   : []),
@@ -120,19 +81,11 @@ export function AssetDetailPage() {
                 { label: "Manufacturer", value: asset.manufacturer ?? "—" },
                 {
                   label: "Model",
-                  value: (
-                    <span className="mono" style={{ fontSize: "12.5px" }}>
-                      {asset.model ?? "—"}
-                    </span>
-                  ),
+                  value: <span className="mono-sm">{asset.model ?? "—"}</span>,
                 },
                 {
                   label: "Model ID",
-                  value: (
-                    <span className="mono" style={{ fontSize: "12.5px" }}>
-                      {asset.model_id ?? "—"}
-                    </span>
-                  ),
+                  value: <span className="mono-sm">{asset.model_id ?? "—"}</span>,
                 },
                 { label: "SW", value: asset.sw_version ?? "—" },
                 { label: "HW", value: asset.hw_version ?? "—" },
@@ -142,21 +95,14 @@ export function AssetDetailPage() {
                   label: "Enriched",
                   value: asset.last_enrichment_success_at ? (
                     <>
-                      <Tag variant="good">ok</Tag>{" "}
-                      {rel(asset.last_enrichment_success_at)}
+                      <Tag variant="good">ok</Tag> {rel(asset.last_enrichment_success_at)}
                     </>
                   ) : asset.last_enrichment_error ? (
                     <>
-                      <Tag variant="danger">error</Tag>{" "}
-                      {asset.last_enrichment_error}
+                      <Tag variant="danger">error</Tag> {asset.last_enrichment_error}
                     </>
                   ) : (
-                    <span
-                      className="muted"
-                      style={{ color: "var(--text-faint)" }}
-                    >
-                      never
-                    </span>
+                    <span className="muted text-faint">never</span>
                   ),
                 },
               ]}
@@ -171,21 +117,13 @@ export function AssetDetailPage() {
           <h2>Links</h2>
           <div className="card">
             {links.length === 0 ? (
-              <div className="empty" style={{ padding: 16 }}>
-                No links yet. Click Enrich to generate.
-              </div>
+              <div className="empty compact">No links yet. Click Enrich to generate.</div>
             ) : (
               <div className="links-list">
                 {links.map((l) => (
                   <div key={l.id}>
-                    <span className="kind">
-                      {KIND_LABELS[l.kind] ?? l.kind}
-                    </span>
-                    <a
-                      href={l.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
+                    <span className="kind">{KIND_LABELS[l.kind] ?? l.kind}</span>
+                    <a href={l.url} target="_blank" rel="noopener noreferrer">
                       {l.url}
                     </a>
                   </div>
@@ -197,14 +135,9 @@ export function AssetDetailPage() {
           <h2>Files</h2>
           <div className="card">
             {files.length === 0 ? (
-              <div className="empty" style={{ padding: 16 }}>
-                No files downloaded yet.
-              </div>
+              <div className="empty compact">No files downloaded yet.</div>
             ) : (
-              <table
-                className="rows"
-                style={{ border: "none", boxShadow: "none" }}
-              >
+              <table className="rows flat">
                 <thead>
                   <tr>
                     <th>Kind</th>
@@ -245,7 +178,17 @@ export function AssetDetailPage() {
 
 // -- Action buttons -----------------------------------------------------------
 
-function ActionButtons({ asset }: { asset: { id: string; source: string; hidden: number; manufacturer: string | null; model: string | null } }) {
+function ActionButtons({
+  asset,
+}: {
+  asset: {
+    id: string;
+    source: string;
+    hidden: number;
+    manufacturer: string | null;
+    model: string | null;
+  };
+}) {
   const { flash } = useFlash();
   const qc = useQueryClient();
   const navigate = useNavigate();
@@ -253,9 +196,7 @@ function ActionButtons({ asset }: { asset: { id: string; source: string; hidden:
   const enrichMut = useMutation({
     mutationFn: () => api.enrichAsset(asset.id),
     onSuccess: (r) => {
-      const linkCount = Object.values(r.links).filter(
-        (v) => typeof v === "string",
-      ).length;
+      const linkCount = Object.values(r.links).filter((v) => typeof v === "string").length;
       flash(
         "ok",
         `Enriched (${r.cache}) — ${linkCount} links${r.manual_downloaded ? ", manual PDF saved" : ""}`,
@@ -290,22 +231,12 @@ function ActionButtons({ asset }: { asset: { id: string; source: string; hidden:
       <button
         className="btn primary"
         onClick={() => enrichMut.mutate()}
-        disabled={
-          enrichMut.isPending || !asset.manufacturer || !asset.model
-        }
-        title={
-          !asset.manufacturer || !asset.model
-            ? "No manufacturer/model to enrich"
-            : undefined
-        }
+        disabled={enrichMut.isPending || !asset.manufacturer || !asset.model}
+        title={!asset.manufacturer || !asset.model ? "No manufacturer/model to enrich" : undefined}
       >
         {enrichMut.isPending ? "Enriching…" : "⚡ Enrich"}
       </button>
-      <button
-        className="btn"
-        onClick={() => toggleMut.mutate()}
-        disabled={toggleMut.isPending}
-      >
+      <button className="btn" onClick={() => toggleMut.mutate()} disabled={toggleMut.isPending}>
         {asset.hidden ? "Unhide" : "Hide"}
       </button>
       {asset.source === "manual" && (
@@ -345,22 +276,16 @@ function EditForm({
   const [areaId, setAreaId] = useState(asset.area_id ?? "");
   const [purchaseDate, setPurchaseDate] = useState(asset.purchase_date ?? "");
   const [purchasePrice, setPurchasePrice] = useState(
-    asset.purchase_price_cents != null
-      ? (asset.purchase_price_cents / 100).toFixed(2)
-      : "",
+    asset.purchase_price_cents != null ? (asset.purchase_price_cents / 100).toFixed(2) : "",
   );
-  const [warrantyUntil, setWarrantyUntil] = useState(
-    asset.warranty_until ?? "",
-  );
+  const [warrantyUntil, setWarrantyUntil] = useState(asset.warranty_until ?? "");
   const [notes, setNotes] = useState(asset.notes ?? "");
 
   // Fetch areas for the dropdown
   const { data: areaData } = useQuery({
     queryKey: ["areas-for-edit"],
     queryFn: async () => {
-      const res = await fetch(
-        `${(await import("../api.ts")).getBaseUrl()}/api/areas`,
-      );
+      const res = await fetch(`${(await import("../api.ts")).getBaseUrl()}/api/areas`);
       if (!res.ok) return { areas: [] };
       const json = await res.json();
       return json as { areas: Array<{ id: string; name: string }> };
@@ -416,11 +341,7 @@ function EditForm({
       </label>
       <label>
         <span>Purchase date</span>
-        <input
-          type="date"
-          value={purchaseDate}
-          onChange={(e) => setPurchaseDate(e.target.value)}
-        />
+        <input type="date" value={purchaseDate} onChange={(e) => setPurchaseDate(e.target.value)} />
       </label>
       <label>
         <span>Purchase price</span>
@@ -448,11 +369,7 @@ function EditForm({
         />
       </label>
       <div className="actions">
-        <button
-          className="btn primary"
-          type="submit"
-          disabled={mutation.isPending}
-        >
+        <button className="btn primary" type="submit" disabled={mutation.isPending}>
           {mutation.isPending ? "Saving…" : "Save"}
         </button>
       </div>
