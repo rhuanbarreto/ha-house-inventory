@@ -1,8 +1,8 @@
 # Declare all build args up front so they're visible to both stages and
 # BuildKit doesn't complain about "undeclared" ARGs in later FROM lines.
 # renovate: datasource=docker depName=oven/bun
-ARG BUN_VERSION=1.3-alpine
-ARG BUILD_FROM=ghcr.io/home-assistant/amd64-base:3.19
+ARG BUN_VERSION=1.3-alpine@sha256:4de475389889577f346c636f956b42a5c31501b654664e9ae5726f94d7bb5349
+ARG BUILD_FROM=ghcr.io/home-assistant/amd64-base:3.19@sha256:064e13687f5d2b839c2f7304ae57c71fed4d60f5311e8c8b11ae75fa32c11c6f
 
 ############################################################################
 # Stage 1 — build the React SPA frontend + compile the backend binary.
