@@ -4,6 +4,9 @@
  * Uses code-based route definitions (no file-based codegen needed for
  * 6 flat routes). Each route has a loader that pre-fetches data via
  * TanStack Query's `ensureQueryData`.
+ *
+ * Routes are eagerly imported — code-splitting 6 tiny pages adds
+ * complexity without meaningful benefit for a local-network add-on.
  */
 
 import { createRootRoute, createRoute, createRouter } from "@tanstack/react-router";
@@ -14,6 +17,7 @@ import { getBaseUrl } from "./api.ts";
 // Routes are eagerly imported (not lazy/code-split). For 6 small pages
 // on a local-network add-on, the overhead of code-splitting infrastructure
 // exceeds the bundle size savings.
+
 
 import { RootLayout } from "./routes/__root.tsx";
 import { DashboardPage } from "./routes/index.tsx";

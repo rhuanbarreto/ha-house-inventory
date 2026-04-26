@@ -231,8 +231,10 @@ ${searchBlob}`;
 /**
  * Null out fields whose URL wasn't in the candidate pool and isn't on a
  * trusted domain for this brand. Preserves non-URL fields verbatim.
+ *
+ * Exported for testing — this is the anti-hallucination gate.
  */
-function validateUrls(
+export function validateUrls(
   links: EnrichedLinks,
   candidates: SearchResult[],
   manufacturer: string,
