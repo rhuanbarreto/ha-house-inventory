@@ -2,7 +2,7 @@
 # BuildKit doesn't complain about "undeclared" ARGs in later FROM lines.
 # renovate: datasource=docker depName=oven/bun
 ARG BUN_VERSION=1.3-alpine@sha256:4de475389889577f346c636f956b42a5c31501b654664e9ae5726f94d7bb5349
-ARG BUILD_FROM=ghcr.io/home-assistant/amd64-base:3.19@sha256:064e13687f5d2b839c2f7304ae57c71fed4d60f5311e8c8b11ae75fa32c11c6f
+ARG BUILD_FROM=ghcr.io/home-assistant/amd64-base:3.23@sha256:93d485d81c81fcc69ee13e981d11e97b0191e5d2f9f5d5e4c5e60a6a81300bd0
 
 ############################################################################
 # Stage 1 — build the React SPA frontend + compile the backend binary.
