@@ -2,11 +2,7 @@
  * LLM picker page — select/create/clear AI task entities.
  */
 
-import {
-  useQuery,
-  useMutation,
-  useQueryClient,
-} from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { llmQuery, llmCreatableQuery, keys } from "../query.ts";
 import { api } from "../api.ts";
@@ -34,21 +30,18 @@ export function LlmPage() {
 
   const current = llm.current;
   const aiTasks = llm.discovered.filter((e) => e.kind === "ai_task");
-  const conversationAgents = llm.discovered.filter(
-    (e) => e.kind === "conversation",
-  );
+  const conversationAgents = llm.discovered.filter((e) => e.kind === "conversation");
 
   return (
     <>
       <h1>LLM for enrichment</h1>
 
-      <div className="card" style={{ marginBottom: 16 }}>
+      <div className="card mb-16">
         {current ? (
           <>
             <strong>Currently selected:</strong> <code>{current}</code>
             <button
-              className="btn"
-              style={{ marginLeft: 8 }}
+              className="btn ml-8"
               onClick={() => clearMut.mutate()}
               disabled={clearMut.isPending}
             >
@@ -57,22 +50,17 @@ export function LlmPage() {
           </>
         ) : (
           <strong>
-            No LLM selected. Pick an AI Task or conversation agent below, or
-            create a new AI Task from an existing LLM integration.
+            No LLM selected. Pick an AI Task or conversation agent below, or create a new AI Task
+            from an existing LLM integration.
           </strong>
         )}
       </div>
 
       <h2>
-        AI Tasks{" "}
-        <span style={{ color: "var(--text-faint)", fontWeight: 400 }}>
-          · preferred
-        </span>
+        AI Tasks <span className="h2-hint">· preferred</span>
       </h2>
       {aiTasks.length === 0 ? (
-        <div className="card empty">
-          No AI Tasks found. Create one below.
-        </div>
+        <div className="card empty">No AI Tasks found. Create one below.</div>
       ) : (
         <EntityTable entities={aiTasks} currentId={current} />
       )}
@@ -87,15 +75,11 @@ export function LlmPage() {
       )}
 
       <h2>
-        Conversation agents{" "}
-        <span style={{ color: "var(--text-faint)", fontWeight: 400 }}>
-          · fallback
-        </span>
+        Conversation agents <span className="h2-hint">· fallback</span>
       </h2>
       {conversationAgents.length === 0 ? (
         <div className="card empty">
-          No conversation agents found (except HA's built-in Assist, which is
-          filtered out).
+          No conversation agents found (except HA's built-in Assist, which is filtered out).
         </div>
       ) : (
         <EntityTable entities={conversationAgents} currentId={current} />
@@ -106,13 +90,7 @@ export function LlmPage() {
 
 // -- Entity table with Select buttons -----------------------------------------
 
-function EntityTable({
-  entities,
-  currentId,
-}: {
-  entities: LlmEntity[];
-  currentId: string | null;
-}) {
+function EntityTable({ entities, currentId }: { entities: LlmEntity[]; currentId: string | null }) {
   const { flash } = useFlash();
   const qc = useQueryClient();
 
@@ -144,9 +122,7 @@ function EntityTable({
             </td>
             <td>{e.friendly_name ?? "—"}</td>
             <td>
-              <Tag variant={e.kind === "ai_task" ? "good" : "default"}>
-                {e.kind}
-              </Tag>
+              <Tag variant={e.kind === "ai_task" ? "good" : "default"}>{e.kind}</Tag>
             </td>
             <td>
               {currentId === e.entity_id ? (
@@ -181,10 +157,7 @@ function CreateForm({ entry }: { entry: CreatableEntry }) {
       if (r.entity_id) {
         flash("ok", `Created ${r.entity_id}`);
       } else {
-        flash(
-          "info",
-          "Subentry created but entity didn't surface — refresh in a moment.",
-        );
+        flash("info", "Subentry created but entity didn't surface — refresh in a moment.");
       }
       qc.invalidateQueries({ queryKey: keys.llm });
       qc.invalidateQueries({ queryKey: keys.llmCreatable });
@@ -195,8 +168,7 @@ function CreateForm({ entry }: { entry: CreatableEntry }) {
 
   return (
     <form
-      className="card form-stack"
-      style={{ marginBottom: 12 }}
+      className="card form-stack mb-12"
       onSubmit={(e) => {
         e.preventDefault();
         mutation.mutate();
@@ -204,10 +176,7 @@ function CreateForm({ entry }: { entry: CreatableEntry }) {
     >
       <div>
         <strong>{entry.title}</strong>
-        <span
-          className="muted"
-          style={{ color: "var(--text-dim)" }}
-        >
+        <span className="muted text-dim">
           {" "}
           · {entry.domain} · {entry.existing_subentries} existing subentr
           {entry.existing_subentries === 1 ? "y" : "ies"}
@@ -224,11 +193,7 @@ function CreateForm({ entry }: { entry: CreatableEntry }) {
         />
       </label>
       <div className="actions">
-        <button
-          className="btn primary"
-          type="submit"
-          disabled={mutation.isPending}
-        >
+        <button className="btn primary" type="submit" disabled={mutation.isPending}>
           {mutation.isPending ? "Creating…" : "Create AI Task"}
         </button>
       </div>

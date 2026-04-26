@@ -124,7 +124,7 @@ src/frontend/
 - **DO** use the typed `api` object from `src/frontend/api.ts` for all backend communication. Never call `fetch()` directly against `/api/*` endpoints from components or route files.
 - **DO** define reusable query options in `src/frontend/query.ts` (e.g., `export const dashboardQuery = { queryKey: ["dashboard"], queryFn: api.getDashboard }`). Components MUST reference these definitions via `useQuery(queryDef)`.
 - **DO** use `getBaseUrl()` from `api.ts` to read the HA Ingress path. This function reads the `<meta name="ingress-path">` tag once and caches the result for the session lifetime.
-- **DO** use plain CSS in `src/frontend/app.css`. Support dark and light mode via `prefers-color-scheme` media queries.
+- **DO** use plain CSS in `src/frontend/app.css`. Support dark and light mode via `prefers-color-scheme` media queries. All layout, spacing, and color styles MUST be CSS classes — not inline `style={{}}` props.
 - **DO** keep reusable UI components in `src/frontend/components/` and custom hooks in `src/frontend/hooks/`. Each component MUST be a named export (not a default export).
 - **DO** define shared TypeScript interfaces in `src/frontend/types.ts`. Route-specific types may live in the route file if they are not shared.
 
@@ -137,6 +137,7 @@ src/frontend/
 - **DON'T** add external state management libraries (Redux, Zustand, Jotai, MobX). TanStack Query manages server state; `useState` handles local UI state.
 - **DON'T** introduce code splitting or lazy route loading. The total SPA bundle for 6 pages is small enough that eager loading is faster than the overhead of dynamic imports on a local network.
 - **DON'T** use default exports for components or hooks. Named exports (`export function AssetListPage()`) enable consistent import patterns and better IDE refactoring.
+- **DON'T** use inline `style={{}}` props in JSX. All visual styles MUST be defined as CSS classes in `src/frontend/app.css`. The only exception is truly dynamic values computed at render time (e.g., setting a CSS custom property like `--pct` for a progress bar width). Inline styles bypass the centralized stylesheet, make styles harder to find, and defeat dark/light mode consistency via CSS variables. Enforced by `oxlint` via `react-perf/jsx-no-new-object-as-prop`.
 
 ## Implementation Pattern
 
@@ -254,6 +255,8 @@ const res = await fetch(`${getBaseUrl()}/api/enrich/${assetId}`, {
 
 - **TypeScript compilation:** `tsc --noEmit -p tsconfig.frontend.json` (run by `bun run typecheck` per [ARCH-001](./ARCH-001-tech-stack-and-runtime.md)) catches type errors in route definitions, query definitions, and component props. TanStack Router's type inference flags route param mismatches at compile time.
 - **Bun bundler:** The `scripts/build.ts` build script bundles the SPA. If a component has an import error or references a non-existent module, the build fails.
+- **oxlint:** `bun run lint` runs [oxlint](https://oxc.rs/) on `src/frontend/`. The `.oxlintrc.json` config enables the `react-perf` plugin with `jsx-no-new-object-as-prop` set to `warn`, which catches inline `style={{}}` props and other new-object-as-prop patterns. TanStack Router `search`/`params` props produce expected warnings that are acceptable.
+- **oxfmt:** `bun run fmt` runs [oxfmt](https://oxc.rs/docs/guide/usage/formatter) to auto-format all source files. `bun run fmt:check` verifies formatting without writing changes.
 
 ### Manual Enforcement
 

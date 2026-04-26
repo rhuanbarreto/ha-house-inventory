@@ -1,0 +1,10 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicolo-ribaudo/oxc-project/json-schemas/npm/oxlint/configuration/oxlintrc.schema.json",
+  "plugins": ["react", "react-perf", "typescript", "unicorn", "oxc"],
+  "categories": {
+    "correctness": "error"
+  },
+  "rules": {
+    "react-perf/jsx-no-new-object-as-prop": "warn"
+  }
+}

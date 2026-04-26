@@ -46,10 +46,7 @@ export async function webSearch(
 
 // ---- DuckDuckGo -------------------------------------------------------------
 
-export async function searchDuckDuckGo(
-  query: string,
-  limit = 10,
-): Promise<SearchResult[]> {
+export async function searchDuckDuckGo(query: string, limit = 10): Promise<SearchResult[]> {
   const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
   const res = await fetch(url, {
     headers: {
@@ -157,11 +154,7 @@ interface BraveSearchResponse {
   web?: { results?: BraveWebResult[] };
 }
 
-async function searchBrave(
-  query: string,
-  limit: number,
-  apiKey: string,
-): Promise<SearchResult[]> {
+async function searchBrave(query: string, limit: number, apiKey: string): Promise<SearchResult[]> {
   const url = new URL("https://api.search.brave.com/res/v1/web/search");
   url.searchParams.set("q", query);
   url.searchParams.set("count", String(Math.min(limit, 20)));
@@ -175,9 +168,7 @@ async function searchBrave(
     },
   });
   if (!res.ok) {
-    throw new Error(
-      `Brave Search failed: ${res.status} ${res.statusText}`,
-    );
+    throw new Error(`Brave Search failed: ${res.status} ${res.statusText}`);
   }
 
   const data = (await res.json()) as BraveSearchResponse;

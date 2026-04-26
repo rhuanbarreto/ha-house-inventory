@@ -109,9 +109,7 @@ export function isTrustedDomain(url: string, manufacturer: string): boolean {
   } catch {
     return false;
   }
-  return seed.trusted_domains.some(
-    (d) => host === d || host.endsWith(`.${d}`),
-  );
+  return seed.trusted_domains.some((d) => host === d || host.endsWith(`.${d}`));
 }
 
 function normalise(manufacturer: string): string {
