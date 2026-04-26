@@ -2,16 +2,26 @@ name: CI
 
 on:
   pull_request:
-    paths:
-      - "house-inventory/**"
-      - ".archgate/**"
-      - ".github/workflows/build.yml"
+    types: [opened, reopened, edited, synchronize]
   workflow_dispatch:
 
 # Validates that the Dockerfile builds, code is formatted, linted,
 # type-checked, and the frontend bundles on every PR.
 # Pushing images to GHCR happens in release.yml (on merge to main).
 jobs:
+  pr-title:
+    name: lint pr title
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile || bun install
+      - name: Validate PR title follows Conventional Commits
+        run: echo "${{ github.event.pull_request.title }}" | bunx commitlint
+
   verify:
     name: format · lint · typecheck · build
     runs-on: ubuntu-latest
