@@ -4,6 +4,36 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.0] — 2026-04-26
+
+### Added
+
+- Test suite: unit tests for brand seeds, database operations, enrichment
+  backoff, enrichment validation, and asset filters.
+- Progressive enrichment backoff — assets that repeatedly fail enrichment
+  are retried with increasing delays instead of hammering the LLM.
+- Areas as the default landing page with HA-style card grid layout.
+- Favicon for the web UI.
+
+### Changed
+
+- Replaced simple-release (Conventional Commits) with a simpler
+  version-driven release pipeline. Bump `version` in `config.yaml`,
+  update `CHANGELOG.md`, and merge to `main` — the workflow handles
+  the rest.
+- Redesigned areas page as a card grid matching Home Assistant's visual
+  style, using oxlint and oxfmt for linting/formatting.
+
+### Fixed
+
+- Release workflow permission error (HTTP 403) when dispatching CI on
+  the release branch.
+
+### Removed
+
+- Dead code cleanup: removed unused imports, unreachable branches, and
+  stale type definitions identified during test suite development.
+
 ## [0.2.2] — 2025-04-25
 
 ### Fixed
