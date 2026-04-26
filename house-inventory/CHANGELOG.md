@@ -4,6 +4,52 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.2.3] — 2026-04-26
+
+### Added
+
+- Test suite with 48 tests across 5 files covering filters, brand-seeds,
+  enrichment URL validation, DB migrations, and exponential backoff logic (#24).
+- MdiIcon component mapping common `mdi:*` icon names to inline SVGs and
+  AreaCard component for area tiles (#25).
+- oxlint with `react-perf` plugin and oxfmt for consistent code formatting;
+  CI verify job running format check, lint, typecheck, and build (#25).
+- Favicon support — `icon.png` copied into static build output with
+  `<link rel="icon">` and `<link rel="apple-touch-icon">` (#26).
+- Automated release workflow with simple-release-action for Conventional
+  Commits-based version bumping (#26).
+- PR title linting with commitlint to validate Conventional Commits
+  format before merge (#32).
+- CSS type declaration (`css.d.ts`) for TypeScript 6 compatibility (#37).
+
+### Changed
+
+- Areas page is now the default route (`/`) instead of Dashboard;
+  Dashboard moved to `/dashboard` (#26).
+- Redesigned areas page from table layout to responsive HA-style card
+  grid matching Home Assistant's areas view (#25).
+- Replaced all 48 inline `style={{}}` violations with CSS classes in
+  `app.css` (#25).
+- Replaced flat 6 h enrichment backoff with exponential backoff based on
+  per-asset `enrichment_attempts` (6 h → 12 h → 24 h → … capped at
+  8 d) (#24).
+- Updated TypeScript to v6 (#37).
+- Updated `ghcr.io/home-assistant/amd64-base` Docker tag to v3.23 (#38).
+- Updated github-actions to latest major versions (#39).
+- Pinned dependencies (#33, #34, #35, #36).
+
+### Fixed
+
+- Release workflow HTTP 403 by adding `actions: write` permission (#27).
+- CI dispatch step crash (HTTP 422) when simple-release didn't create a
+  release branch — now guards against both empty and `"null"` ref
+  values (#31).
+
+### Removed
+
+- Dead lazy-import declarations and abandoned `rootRoute` from
+  `router.tsx` (#24).
+
 ## [0.2.2] — 2025-04-25
 
 ### Fixed

@@ -1,6 +1,6 @@
 {
   "name": "house-inventory",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "House asset inventory — Home Assistant add-on",
   "private": true,
   "type": "module",
