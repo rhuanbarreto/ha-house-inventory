@@ -21,13 +21,7 @@ concurrency:
   group: release-${{ github.ref_name }}
   cancel-in-progress: false
 
-permissions:
-  actions: write
-  contents: write
-  packages: write
-  id-token: write
-  pull-requests: write
-  statuses: write
+permissions: {}
 
 jobs:
   # --------------------------------------------------------------------------
@@ -36,13 +30,24 @@ jobs:
   check:
     name: Context check
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     timeout-minutes: 10
     outputs:
       continue: ${{ steps.check.outputs.continue }}
       workflow: ${{ steps.check.outputs.workflow }}
     steps:
+      - name: Generate token
+        id: generate_token
+        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3
+        with:
+          app-id: ${{ secrets.GH_APP_APP_ID }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          token: ${{ steps.generate_token.outputs.token }}
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
@@ -56,7 +61,7 @@ jobs:
         uses: TrigenSoftware/simple-release-action@a796225481a62b5b46b37d4481ef7fb114a6d399 # v1.1.9
         with:
           workflow: check
-          github-token: ${{ github.token }}
+          github-token: ${{ steps.generate_token.outputs.token }}
           branch: release
 
   # --------------------------------------------------------------------------
@@ -66,6 +71,11 @@ jobs:
     name: Release PR
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      actions: write
+      contents: write
+      pull-requests: write
+      statuses: write
     needs: check
     if: needs.check.outputs.workflow == 'pull-request'
     steps:
@@ -116,13 +126,25 @@ jobs:
     name: Release
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: write
+      id-token: write
     needs: check
     if: needs.check.outputs.workflow == 'release'
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
+      - name: Generate token
+        id: generate_token
+        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3
+        with:
+          app-id: ${{ secrets.GH_APP_APP_ID }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          token: ${{ steps.generate_token.outputs.token }}
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
@@ -138,7 +160,7 @@ jobs:
         uses: TrigenSoftware/simple-release-action@a796225481a62b5b46b37d4481ef7fb114a6d399 # v1.1.9
         with:
           workflow: release
-          github-token: ${{ github.token }}
+          github-token: ${{ steps.generate_token.outputs.token }}
           branch: release
 
       - name: Extract version from config.yaml
@@ -156,6 +178,9 @@ jobs:
     name: Build & push (${{ matrix.arch }})
     needs: release
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     strategy:
       fail-fast: false
       matrix:
