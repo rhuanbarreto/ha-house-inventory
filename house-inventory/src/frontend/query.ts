@@ -83,6 +83,12 @@ export const llmCreatableQuery = queryOptions({
   queryFn: () => api.getCreatableEntries(),
 });
 
+export const enrichStatusQuery = queryOptions({
+  queryKey: keys.enrichStatus,
+  queryFn: () => api.getEnrichStatus(),
+  staleTime: 60_000, // queue counts change slowly
+});
+
 export const enrichInFlightQuery = queryOptions({
   queryKey: keys.enrichInFlight,
   queryFn: () => api.getInFlight(),

@@ -5,7 +5,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useState } from "react";
-import { assetDetailQuery, keys } from "../query.ts";
+import { assetDetailQuery, areasQuery, keys } from "../query.ts";
 import { api, getBaseUrl } from "../api.ts";
 import { useFlash } from "../hooks/useFlash.ts";
 import { Tag } from "../components/Tag.tsx";
@@ -281,17 +281,8 @@ function EditForm({
   const [warrantyUntil, setWarrantyUntil] = useState(asset.warranty_until ?? "");
   const [notes, setNotes] = useState(asset.notes ?? "");
 
-  // Fetch areas for the dropdown
-  const { data: areaData } = useQuery({
-    queryKey: ["areas-for-edit"],
-    queryFn: async () => {
-      const res = await fetch(`${(await import("../api.ts")).getBaseUrl()}/api/areas`);
-      if (!res.ok) return { areas: [] };
-      const json = await res.json();
-      return json as { areas: Array<{ id: string; name: string }> };
-    },
-    staleTime: 60_000,
-  });
+  // Fetch areas for the dropdown via the shared query definition
+  const { data: areaData } = useQuery(areasQuery);
   const areas = areaData?.areas ?? [];
 
   const mutation = useMutation({

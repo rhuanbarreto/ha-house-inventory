@@ -196,7 +196,9 @@ api.get("/assets", (c) => {
   const where: string[] = [`a.hidden = ${showHidden ? 1 : 0}`];
   const params: (string | number)[] = [];
   const area = c.req.query("area");
-  if (area) {
+  if (area === "__none__") {
+    where.push("a.area_id IS NULL");
+  } else if (area) {
     where.push("a.area_id = ?");
     params.push(area);
   }
@@ -211,7 +213,11 @@ api.get("/assets", (c) => {
   const rows = db
     .query(
       `SELECT a.id, a.name, a.manufacturer, a.model, a.area_id,
-              ar.name AS area_name, a.source, a.hidden, a.hidden_reason
+              ar.name AS area_name, a.source, a.hidden, a.hidden_reason,
+              a.last_enrichment_success_at,
+              a.last_enrichment_error,
+              a.enrichment_attempts,
+              (SELECT COUNT(*) FROM asset_links l WHERE l.asset_id = a.id) AS link_count
        FROM assets a
        LEFT JOIN areas ar ON ar.id = a.area_id
        WHERE ${where.join(" AND ")}
