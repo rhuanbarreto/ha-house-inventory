@@ -4,6 +4,28 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.0] — 2026-04-26
+
+### Added
+
+- Test suite: unit tests for database layer, enrichment backoff, enrichment
+  validation, brand seeds, and filter logic.
+- Progressive enrichment backoff — assets that repeatedly fail enrichment are
+  retried with increasing delays instead of blocking the queue.
+
+### Changed
+
+- Redesigned areas page as an HA-style card grid grouped by floor, with
+  per-area asset and enrichment counts.
+- Areas is now the default landing page.
+- Added favicon for browser tabs and bookmarks.
+- Simplified release workflow: replaced simple-release/conventional-commits
+  with a version-driven pipeline that reads from `config.yaml`.
+
+### Fixed
+
+- Dead code cleanup across enrichment and sync modules.
+
 ## [0.2.2] — 2025-04-25
 
 ### Fixed
