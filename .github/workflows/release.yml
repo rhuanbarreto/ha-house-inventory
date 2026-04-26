@@ -90,9 +90,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          HEAD_SHA=$(gh api repos/${{ github.repository }}/git/ref/heads/release --jq '.object.sha' 2>/dev/null) || true
+          HEAD_SHA=$(gh api repos/${{ github.repository }}/git/ref/heads/release --jq '.object.sha' 2>/dev/null || echo "")
 
-          if [ -z "$HEAD_SHA" ]; then
+          if [ -z "$HEAD_SHA" ] || [ "$HEAD_SHA" = "null" ]; then
             echo "No release branch found — nothing to validate"
             exit 0
           fi
