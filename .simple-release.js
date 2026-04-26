@@ -14,16 +14,19 @@ import { NpmProject } from "@simple-release/npm";
  * workflow steps that follow the simple-release action.
  */
 class HouseInventoryProject extends NpmProject {
-  constructor() {
-    super({ path: "house-inventory/package.json" });
-  }
-
   async bump(options) {
     const result = await super.bump(options);
 
     if (result) {
-      const pkg = JSON.parse(readFileSync("house-inventory/package.json", "utf8"));
-      const version = pkg.version;
+      const rootPkg = JSON.parse(readFileSync("package.json", "utf8"));
+      const version = rootPkg.version;
+
+      // Sync the version into house-inventory/package.json.
+      const subPkgPath = "house-inventory/package.json";
+      const subPkg = JSON.parse(readFileSync(subPkgPath, "utf8"));
+      subPkg.version = version;
+      writeFileSync(subPkgPath, JSON.stringify(subPkg, null, 2) + "\n");
+      this.changedFiles.push(subPkgPath);
 
       // Sync the version into config.yaml (the HA add-on manifest).
       const configPath = "house-inventory/config.yaml";

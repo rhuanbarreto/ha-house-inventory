@@ -1,5 +1,6 @@
 {
-  "private": true,
+  "name": "ha-house-inventory",
+  "version": "0.2.3",
   "description": "Release tooling for the House Inventory HA add-on",
   "devDependencies": {
     "@commitlint/cli": "20.5.2",
