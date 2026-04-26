@@ -5,7 +5,7 @@
  * Usage: bun run scripts/build.ts
  */
 
-import { rmSync, mkdirSync } from "node:fs";
+import { rmSync, mkdirSync, copyFileSync } from "node:fs";
 import { join, basename } from "node:path";
 
 const ROOT = join(import.meta.dir, "..");
@@ -56,6 +56,9 @@ if (!jsEntry) {
   process.exit(1);
 }
 
+// Copy the add-on icon into the static directory so it can be served as a favicon.
+copyFileSync(join(ROOT, "icon.png"), join(OUT_DIR, "favicon.png"));
+
 // Generate index.html
 // The server injects the ingress path into the meta tag at serve time.
 const html = `<!doctype html>
@@ -65,6 +68,8 @@ const html = `<!doctype html>
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <meta name="ingress-path" content="" />
     <title>House Inventory</title>
+    <link rel="icon" href="./static/favicon.png" />
+    <link rel="apple-touch-icon" href="./static/favicon.png" />
     ${cssFile ? `<link rel="stylesheet" href="./static/${cssFile}" />` : ""}
   </head>
   <body>

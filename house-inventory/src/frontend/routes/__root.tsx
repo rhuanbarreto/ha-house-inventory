@@ -22,9 +22,9 @@ export function RootLayout() {
         <header className="top">
           <div className="brand">House Inventory</div>
           <nav>
-            {navLink("/", "Dashboard")}
+            {navLink("/", "Areas")}
             {navLink("/assets", "Assets")}
-            {navLink("/areas", "Areas")}
+            {navLink("/dashboard", "Dashboard")}
             {navLink("/llm", "LLM")}
           </nav>
         </header>

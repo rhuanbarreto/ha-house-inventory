@@ -46,7 +46,10 @@ export function AreasPage() {
       </p>
 
       {blocks.length === 0 ? (
-        <div className="card empty">No areas synced yet. Run a sync from the dashboard.</div>
+        <div className="card empty">
+          No areas synced yet. Run a sync from the{" "}
+          <Link to="/dashboard">dashboard</Link>.
+        </div>
       ) : (
         blocks.map((block) => (
           <FloorSection

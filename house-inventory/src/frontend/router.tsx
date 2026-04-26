@@ -40,8 +40,8 @@ const rootDef = createRootRoute({
 const indexRoute = createRoute({
   getParentRoute: () => rootDef,
   path: "/",
-  component: DashboardPage,
-  loader: () => queryClient.ensureQueryData(dashboardQuery),
+  component: AreasPage,
+  loader: () => queryClient.ensureQueryData(areasQuery),
 });
 
 const assetsIndexRoute = createRoute({
@@ -77,11 +77,11 @@ const assetDetailRoute = createRoute({
   loader: ({ params }) => queryClient.ensureQueryData(assetDetailQuery(params.id)),
 });
 
-const areasRoute = createRoute({
+const dashboardRoute = createRoute({
   getParentRoute: () => rootDef,
-  path: "/areas",
-  component: AreasPage,
-  loader: () => queryClient.ensureQueryData(areasQuery),
+  path: "/dashboard",
+  component: DashboardPage,
+  loader: () => queryClient.ensureQueryData(dashboardQuery),
 });
 
 const llmRoute = createRoute({
@@ -100,10 +100,10 @@ const llmRoute = createRoute({
 
 const routeTree = rootDef.addChildren([
   indexRoute,
+  dashboardRoute,
   assetsIndexRoute,
   assetsNewRoute,
   assetDetailRoute,
-  areasRoute,
   llmRoute,
 ]);
 
