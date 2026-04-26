@@ -2,7 +2,7 @@
   "private": true,
   "description": "Release tooling for the House Inventory HA add-on",
   "devDependencies": {
-    "@commitlint/cli": "20.5.0",
+    "@commitlint/cli": "20.5.2",
     "@commitlint/config-conventional": "20.5.0",
     "@simple-release/npm": "2.3.0"
   }
