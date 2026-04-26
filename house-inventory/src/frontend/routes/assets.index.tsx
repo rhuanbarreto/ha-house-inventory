@@ -5,7 +5,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { useState } from "react";
-import { assetListQuery } from "../query.ts";
+import { assetListQuery, areasQuery } from "../query.ts";
 import { Tag } from "../components/Tag.tsx";
 
 export function AssetListPage() {
@@ -24,18 +24,8 @@ export function AssetListPage() {
   const [localArea, setLocalArea] = useState(search.area ?? "");
   const [localHidden, setLocalHidden] = useState(search.hidden ?? "0");
 
-  // We need areas for the filter dropdown — fetch them from the area list
-  const { data: areaData } = useQuery({
-    queryKey: ["areas-for-filter"],
-    queryFn: async () => {
-      const res = await fetch(`${(await import("../api.ts")).getBaseUrl()}/api/areas`);
-      if (!res.ok) return { areas: [] };
-      const json = await res.json();
-      return json as { areas: Array<{ id: string; name: string }> };
-    },
-    staleTime: 60_000,
-  });
-
+  // Fetch areas via the shared areasQuery for the filter dropdown
+  const { data: areaData } = useQuery(areasQuery);
   const areas = areaData?.areas ?? [];
 
   const showHidden = params.hidden === "1";
@@ -66,6 +56,7 @@ export function AssetListPage() {
         />
         <select name="area" value={localArea} onChange={(e) => setLocalArea(e.target.value)}>
           <option value="">All areas</option>
+          <option value="__none__">No area</option>
           {areas.map((a) => (
             <option key={a.id} value={a.id}>
               {a.name}
@@ -98,6 +89,7 @@ export function AssetListPage() {
                 <th>Manufacturer</th>
                 <th>Model</th>
                 <th>Area</th>
+                <th>Enriched</th>
                 <th>Source</th>
                 <th></th>
               </tr>
@@ -113,6 +105,14 @@ export function AssetListPage() {
                   <td className={r.manufacturer ? "" : "muted"}>{r.manufacturer ?? "—"}</td>
                   <td className={r.model ? "mono text-sm" : "muted text-sm"}>{r.model ?? "—"}</td>
                   <td className={r.area_id ? "" : "muted"}>{r.area_name ?? r.area_id ?? "—"}</td>
+                  <td>
+                    <EnrichmentBadge
+                      successAt={r.last_enrichment_success_at}
+                      error={r.last_enrichment_error}
+                      attempts={r.enrichment_attempts}
+                      linkCount={r.link_count}
+                    />
+                  </td>
                   <td>
                     <Tag variant={r.source === "manual" ? "accent" : "default"}>
                       {r.source === "manual" ? "manual" : "home_assistant"}
@@ -134,4 +134,32 @@ export function AssetListPage() {
       )}
     </>
   );
+}
+
+/** Compact enrichment status badge for the asset list table. */
+function EnrichmentBadge({
+  successAt,
+  error,
+  attempts,
+  linkCount,
+}: {
+  successAt: string | null;
+  error: string | null;
+  attempts: number;
+  linkCount: number;
+}) {
+  if (successAt) {
+    return (
+      <Tag variant="good">
+        {linkCount} link{linkCount === 1 ? "" : "s"}
+      </Tag>
+    );
+  }
+  if (error) {
+    return <Tag variant="danger">error</Tag>;
+  }
+  if (attempts > 0) {
+    return <Tag variant="warn">pending</Tag>;
+  }
+  return <span className="muted text-faint text-sm">—</span>;
 }

@@ -63,6 +63,10 @@ export interface AssetListItem {
   source: string;
   hidden: number;
   hidden_reason: string | null;
+  last_enrichment_success_at: string | null;
+  last_enrichment_error: string | null;
+  enrichment_attempts: number;
+  link_count: number;
 }
 
 export interface AssetListResponse {

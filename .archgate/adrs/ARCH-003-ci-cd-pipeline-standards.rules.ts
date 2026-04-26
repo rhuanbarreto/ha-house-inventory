@@ -85,7 +85,7 @@ export default {
           }
 
           // Check for base field within current entry
-          if (currentArchLine >= 0 && /^\s+base:\s*\S+/.test(trimmed)) {
+          if (currentArchLine >= 0 && /^base:\s*\S+/.test(trimmed)) {
             foundBase = true;
           }
 

@@ -3,7 +3,7 @@
  */
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { llmQuery, llmCreatableQuery, keys } from "../query.ts";
 import { api } from "../api.ts";
 import { useFlash } from "../hooks/useFlash.ts";
@@ -15,6 +15,30 @@ export function LlmPage() {
   const qc = useQueryClient();
   const { data: llm, isLoading: llmLoading } = useQuery(llmQuery);
   const { data: creatable } = useQuery(llmCreatableQuery);
+  const autoSelectedRef = useRef(false);
+
+  // Stable callback for auto-selecting an AI task entity.
+  const doAutoSelect = useCallback(
+    (entityId: string) => {
+      api
+        .selectLlm(entityId)
+        .then(() => {
+          flash("ok", `Auto-selected ${entityId}`);
+          qc.invalidateQueries({ queryKey: keys.llm });
+          qc.invalidateQueries({ queryKey: keys.dashboard });
+        })
+        .catch((e: Error) => flash("err", e.message));
+    },
+    [flash, qc],
+  );
+
+  // Auto-select the AI task if exactly one is available and none is selected.
+  useEffect(() => {
+    if (llm?.autoSelectable && !autoSelectedRef.current) {
+      autoSelectedRef.current = true;
+      doAutoSelect(llm.autoSelectable);
+    }
+  }, [llm?.autoSelectable, doAutoSelect]);
 
   const clearMut = useMutation({
     mutationFn: () => api.clearLlm(),
