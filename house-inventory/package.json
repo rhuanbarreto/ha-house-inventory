@@ -18,7 +18,7 @@
     "@mdi/js": "^7.4.47",
     "@tanstack/react-query": "5.100.5",
     "@tanstack/react-router": "1.168.24",
-    "hono": "4.12.15",
+    "hono": "4.12.16",
     "react": "19.2.5",
     "react-dom": "19.2.5"
   },
