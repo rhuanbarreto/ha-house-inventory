@@ -25,10 +25,10 @@
   "devDependencies": {
     "@resvg/resvg-js": "2.6.2",
     "@types/bun": "latest",
-    "@types/react": "19.2.15",
+    "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3",
-    "oxfmt": "0.52.0",
-    "oxlint": "1.67.0",
+    "oxfmt": "0.56.0",
+    "oxlint": "1.71.0",
     "typescript": "6.0.3"
   }
 }
