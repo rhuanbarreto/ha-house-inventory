@@ -1,7 +1,7 @@
 # Declare all build args up front so they're visible to both stages and
 # BuildKit doesn't complain about "undeclared" ARGs in later FROM lines.
 # renovate: datasource=docker depName=oven/bun
-ARG BUN_VERSION=1.3-alpine@sha256:4de475389889577f346c636f956b42a5c31501b654664e9ae5726f94d7bb5349
+ARG BUN_VERSION=1.3-alpine@sha256:5acc90a93e91ff07bf72aa90a7c9f0fa189765aec90b47bdbf2152d2196383c0
 ARG BUILD_FROM=ghcr.io/home-assistant/amd64-base:3.23@sha256:93d485d81c81fcc69ee13e981d11e97b0191e5d2f9f5d5e4c5e60a6a81300bd0
 
 ############################################################################
